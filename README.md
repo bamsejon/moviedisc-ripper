@@ -28,7 +28,7 @@ Clone the Repository:
 
 bash
 Code kopieren
-git clone https://github.com/<your-username>/dvd-rip-automation.git
+git clone https://github.com/SMUELDigital/DVD-Rip-Automation-Script.git
 cd dvd-rip-automation
 Customize Paths:
 
