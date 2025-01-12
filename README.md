@@ -15,7 +15,15 @@
 ---
 [![](https://visitcount.itsvg.in/api?id=SMUELDigital&icon=0&color=0)](https://visitcount.itsvg.in)
 
-<!-- Proudly created with GPRM ( https://gprm.itsvg.in ) -->
+<p><p>
+<a href="https://www.buymeacoffee.com/https://buymeacoffee.com/smueldigital">
+<img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="160" alt="buymeacoffee" />
+</a>
+</p>
+</p>
+
+---
+
 
 
 
