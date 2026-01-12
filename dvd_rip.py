@@ -54,7 +54,7 @@ def compress_with_handbrake(input_file, output_file):
         HANDBRAKE_CLI_PATH,
         "-i", input_file,
         "-o", output_file,
-        "--preset", HANDBRAKE_PRESET
+        "--preset", HANDBRAKE_PRESET,
 
         # ✅ SUBTITLES
         "--all-subtitles",
