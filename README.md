@@ -164,12 +164,11 @@ After you have registered as a Patreon or requested a free API key you will reci
 
 ## Step 6:  Edit the .env file (using Terminal)
 
-You now need to edit the .env file and add your OMDb API key.
+You now need to edit the .env.example file, add your OMDb API key and save it as .env
 
 Important:
 	•	Files starting with a dot (.) are hidden in macOS Finder
 	•	You should edit this file using Terminal
-	•	The .env file must never be committed with a real API key
 
 Make sure you are in the project directory
 
@@ -178,17 +177,17 @@ In Terminal, go to the project folder:
 ```cd DVD-Rip-Automation-Script```
 
 
-Verify that the .env file exists:
+Verify that the .env.example file exists:
 ```ls -a```
 
-You should see .env in the list.
+You should see .env.example in the list.
 
 
-Open the .env file for editing
+Open the .env.example file for editing
 
 Open the file in a simple terminal editor:
 
-```nano .env```
+```nano .env.example```
 The screen will switch to a text editor.
 
 
@@ -203,6 +202,7 @@ Step 10: Save and exit
 
 In nano:
 	•	Press Ctrl + O → save
+    •   Rename the file to .env
 	•	Press Enter → confirm
 	•	Press Ctrl + X → exit
 
