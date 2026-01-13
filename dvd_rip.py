@@ -24,9 +24,9 @@ MAKE_MKV_PATH = "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
 HANDBRAKE_CLI_PATH = "/opt/homebrew/bin/HandBrakeCLI"
 
 TEMP_DIR = "/Volumes/Jonte/rip/tmp"
-MOVIES_DIR = "/Volumes/Jonte/rip/movies"
+MOVIES_DIR = "/volumes/nfs-share/media/rippat/movies"
 
-HANDBRAKE_PRESET = "HQ 1080p30 Surround"
+HANDBRAKE_PRESET = "HQ 720p30 Surround"
 
 # ========= HELPERS =========
 
@@ -43,13 +43,37 @@ def run_command(cmd, capture_output=False):
 # ========= DVD DETECTION =========
 
 def get_dvd_volume_label():
-    volumes_path = "/Volumes"
-    for name in os.listdir(volumes_path):
-        path = os.path.join(volumes_path, name)
-        if os.path.ismount(path):
-            upper = name.upper()
-            if "DISC" in upper or "DVD" in upper:
-                return name
+    """
+    Returns the mounted volume name for the first optical disc found (UDF / CD9660).
+    Uses diskutil to avoid guessing based on volume names or permissions.
+    """
+    # List all disks
+    result = run_command(["diskutil", "list"], capture_output=True).stdout
+
+    # Extract disk identifiers like disk2, disk3, etc.
+    disks = []
+    for line in result.splitlines():
+        line = line.strip()
+        if line.startswith("/dev/disk"):
+            disks.append(line.split()[0].replace("/dev/", ""))
+
+    # Inspect each disk
+    for disk in disks:
+        info = run_command(["diskutil", "info", disk], capture_output=True).stdout
+
+        bundle = None
+        mount_point = None
+
+        for line in info.splitlines():
+            if "Type (Bundle):" in line:
+                bundle = line.split(":", 1)[1].strip().lower()
+            elif "Mount Point:" in line:
+                mount_point = line.split(":", 1)[1].strip()
+
+        # Optical media typically mounts as udf or cd9660
+        if bundle in ("udf", "cd9660") and mount_point and mount_point.startswith("/Volumes/"):
+            return os.path.basename(mount_point)
+
     return None
 
 def normalize_title(volume_label):
