@@ -210,7 +210,118 @@ You are now back in Terminal.
 
 ---
 
-## Step 7: Run the script
+## Step 7: Edit the paths in the scropt (where files are stored)
+Before running the script, you may need to adjust where temporary files and finished movies are stored.
+
+This is done by editing the Python script directly.
+
+### 7.1. Make sure you are in the project directory
+In Terminal, go to the project folder:
+
+```cd DVD-Rip-Automation-Script````
+
+Verify that the script exists:
+
+```ls````
+
+You should see a file named:
+
+```dvd_rip.py````
+
+
+### 7.2. Open the script for editing
+Open the script using a simple terminal editor:
+
+```nano dvd_rip.py````
+
+The screen will switch to a text editor.
+
+
+### 7.3. Locate the path configuration section
+Scroll down (use the arrow keys) until you find a section that looks like this:
+
+```TEMP_DIR = "/Volumes/Jonte/rip/tmp"```
+```MOVIES_DIR = "/Volumes/nfs-share/media/rippat/movies"````
+
+These paths control where files are stored.
+
+
+### 7.4. Understand what each path means
+TEMP_DIR
+
+```TEMP_DIR = "/Volumes/Jonte/rip/tmp"````
+
+This directory is used for:
+	•	Raw MKV files directly from MakeMKV
+	•	Temporary files during ripping
+
+Requirements:
+	•	Must exist or be creatable by the script
+	•	Must have enough free disk space (A Blu Ray could take up to 50-60 GB)
+	•	Files here are automatically deleted after transcoding
+
+Example alternatives: 
+
+```TEMP_DIR = "/Users/yourname/Movies/rip_tmp"````
+
+or
+
+```TEMP_DIR = "/Volumes/ExternalSSD/rip_tmp"````
+
+
+MOVIES_DIR
+
+```MOVIES_DIR = "/Volumes/nfs-share/media/rippat/movies"````
+
+This is the final output location, make sure that you have mounted your Jellyfin media folder to your mac.
+
+The script will create a Jellyfin-compatible structure like:
+
+```Movies/                       ```
+```└── Movie Title (Year)/       ```
+```    └── Movie Title (Year).mkv```
+
+Requirements:
+	•	Should be your Jellyfin movie library
+	•	Must be writable
+	•	Can be local or network storage (SMB/NFS/etc)
+
+Example alternatives:
+
+```MOVIES_DIR = "/Volumes/media-shared/Movies"````
+
+or
+
+```MOVIES_DIR = "/Volumes/MediaServer/Movies"```
+
+
+### 7.5. Edit the paths
+Using the keyboard:
+	1.	Move the cursor to the path you want to change
+	2.	Edit the text directly
+	3.	Be careful to keep the quotes (")
+
+Example:
+
+```TEMP_DIR = "/Users/jon/Movies/dvd_tmp"```
+```MOVIES_DIR = "/Volumes/Media/Movies"  ````
+
+
+### 7.6 Save and exit
+In nano:
+	•	Press Ctrl + O → save
+	•	Press Enter → confirm
+	•	Press Ctrl + X → exit
+
+You are now back in Terminal.
+
+
+### 7.7 Verify paths exist (recommended)
+Check that the directories exists:
+
+```ls "/Users/jon/Movies"´´´
+
+## Step 8: Run the script
 
 1. Insert a DVD into your DVD drive
 2. Go back to **Terminal**
