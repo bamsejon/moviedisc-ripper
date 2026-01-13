@@ -160,6 +160,7 @@ Cost: approximately 1–2 EUR per month
 Provides a stable API key  
 Helps keep OMDb maintained
 
+After you have registered as a Patreon (Of course you have ;)) or requested a free API key you will recieve it to your registered email. 
 ---
 
 ## Step 6:  Edit the .env file (using Terminal)
@@ -175,10 +176,11 @@ Important:
 Make sure you are in the project directory
 
 In Terminal, go to the project folder:
+
 ```cd DVD-Rip-Automation-Script```
 
 Verify that the .env file exists:
-```ls -a````
+```ls -a```
 
 You should see .env in the list.
 
