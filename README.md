@@ -36,7 +36,7 @@ First, check if Git is already installed.
 
 In **Terminal**, type the following and press **Enter**:
 
-git --version
+```git --version```
 
 If you see something like:
 git version 2.xx.x  
