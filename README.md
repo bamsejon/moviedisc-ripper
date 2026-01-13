@@ -160,13 +160,13 @@ Cost: approximately 1–2 EUR per month
 Provides a stable API key  
 Helps keep OMDb maintained
 
-After you have registered as a Patreon (Of course you have ;)) or requested a free API key you will recieve it to your registered email. 
+After you have registered as a Patreon or requested a free API key you will recieve it to your registered email. 
+
 ---
 
 ## Step 6:  Edit the .env file (using Terminal)
 
-The project already includes a .env file.
-You only need to edit it and add your OMDb API key.
+You now need to edit the .env file and add your OMDb API key.
 
 Important:
 	•	Files starting with a dot (.) are hidden in macOS Finder
