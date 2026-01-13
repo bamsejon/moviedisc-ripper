@@ -28,39 +28,67 @@ A window will open where you can type text commands.
 
 ## Step 2: Install required software
 
-### 1. MakeMKV (DVD ripping)
+### 1. Git (required to download this project)
 
-MakeMKV is used to read DVDs without quality loss.
+Git is used to download the script from GitHub.
 
-Download and install it from:
-https://www.makemkv.com/download/
+First, check if Git is already installed.
 
-After installing, we want to verify that macOS can find it.
+In **Terminal**, type the following and press **Enter**:
 
-In **Terminal**, type the following line **exactly**, then press **Enter**:
+git --version
 
-/Applications/MakeMKV.app/Contents/MacOS/makemkvcon --version
+If you see something like:
+git version 2.xx.x  
+then Git is already installed and you can continue.
 
-If MakeMKV is installed correctly, you will see version information printed.
-If you see an error saying the file does not exist, MakeMKV is not installed correctly.
+If you see a message saying Git is not installed, macOS will usually offer to install **Command Line Developer Tools**.
+Accept that prompt and wait until installation finishes.
+
+If nothing happens, install Git manually using Homebrew (next section).
 
 ---
 
-### 2. HandBrakeCLI (video transcoding)
+### 2. Homebrew (package manager for macOS)
 
-HandBrakeCLI is used to convert the ripped video into a Jellyfin-friendly format.
-
-We will install it using Homebrew (a package manager for macOS).
-
-First, install Homebrew if you don’t already have it.
+Homebrew is used to install other tools easily.
 
 In **Terminal**, paste this line and press **Enter**:
 
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 Follow the on-screen instructions.
+This may take a few minutes.
 
-Once Homebrew is installed, install HandBrakeCLI.
+After installation, verify Homebrew by typing:
+
+brew --version
+
+---
+
+### 3. MakeMKV (DVD ripping)
+
+MakeMKV is used to read DVDs without quality loss.
+
+Download and install it from:
+https://www.makemkv.com/download/
+
+After installing, verify that macOS can find it.
+
+In **Terminal**, type **exactly**:
+
+/Applications/MakeMKV.app/Contents/MacOS/makemkvcon --version
+
+If MakeMKV is installed correctly, version information will be printed.
+If you see “No such file or directory”, MakeMKV is not installed correctly.
+
+---
+
+### 4. HandBrakeCLI (video transcoding)
+
+HandBrakeCLI converts the ripped video into a Jellyfin-friendly format.
+
+Install it using Homebrew.
 
 In **Terminal**, type:
 
@@ -70,11 +98,9 @@ When installation finishes, verify it by typing:
 
 HandBrakeCLI --version
 
-You should see version information printed.
-
 ---
 
-### 3. Python
+### 5. Python
 
 Python is required to run the script.
 
@@ -92,12 +118,14 @@ brew install python
 
 ## Step 3: Download this project
 
-In **Terminal**, type the following commands one line at a time:
+Now we will download the script from GitHub.
+
+In **Terminal**, type these commands one line at a time:
 
 git clone https://github.com/bamsejon/DVD-Rip-Automation-Script.git
 cd DVD-Rip-Automation-Script
 
-This downloads the script and moves you into its folder.
+You are now inside the project folder.
 
 ---
 
@@ -113,11 +141,11 @@ pip3 install python-dotenv
 
 ## Step 5: Get an OMDb API key (required)
 
-This script uses OMDb to automatically identify movies and create correct folder names.
+This script uses OMDb to automatically identify movies and generate correct folder names.
 
 Important note:
 
-Although OMDb offers a free API tier, all development and testing of this script has been done using a **paid API key**.
+Although OMDb offers a free API tier, **all development and testing of this script has been done using a paid API key**.
 Free keys are rate-limited and unreliable. Correct behavior cannot be guaranteed with a free key.
 
 ### Recommended: support OMDb via Patreon
@@ -149,7 +177,7 @@ Open the file in a text editor and add this line:
 
 OMDB_API_KEY=your_api_key_here
 
-Replace `your_api_key_here` with your actual key.
+Replace `your_api_key_here` with your actual API key.
 
 Save the file.
 
@@ -163,8 +191,7 @@ Important:
 
 1. Insert a DVD into your DVD drive
 2. Go back to **Terminal**
-3. Make sure you are inside the project folder
-   (your prompt should end with `DVD-Rip-Automation-Script`)
+3. Make sure you are inside the `DVD-Rip-Automation-Script` folder
 
 Run the script by typing:
 
@@ -199,6 +226,7 @@ Movies/
 ## Project origin & credit
 
 This project is a fork and extended rewrite of:
+
 https://github.com/SMUELDigital/DVD-Rip-Automation-Script
 
 All credit to SMUELDigital for the original idea and foundation.
