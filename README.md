@@ -39,7 +39,7 @@ In **Terminal**, type the following and press **Enter**:
 ```git --version```
 
 If you see something like:
-git version 2.xx.x  
+```git version 2.xx.x```  
 then Git is already installed and you can continue.
 
 If you see a message saying Git is not installed, macOS will usually offer to install **Command Line Developer Tools**.
@@ -55,20 +55,20 @@ Homebrew is used to install other tools easily.
 
 In **Terminal**, paste this line and press **Enter**:
 
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"```
 
 Follow the on-screen instructions.
 This may take a few minutes.
 
 After installation, verify Homebrew by typing:
 
-brew --version
+```brew --version```
 
 ---
 
-### 3. MakeMKV (DVD ripping)
+### 3. MakeMKV (DVD & Blu Ray ripping)
 
-MakeMKV is used to read DVDs without quality loss.
+MakeMKV is used to read DVDs and Blu rays without quality loss.
 
 Download and install it from:
 https://www.makemkv.com/download/
@@ -77,7 +77,7 @@ After installing, verify that macOS can find it.
 
 In **Terminal**, type **exactly**:
 
-/Applications/MakeMKV.app/Contents/MacOS/makemkvcon --version
+```/Applications/MakeMKV.app/Contents/MacOS/makemkvcon --version```
 
 If MakeMKV is installed correctly, version information will be printed.
 If you see “No such file or directory”, MakeMKV is not installed correctly.
@@ -92,11 +92,11 @@ Install it using Homebrew.
 
 In **Terminal**, type:
 
-brew install handbrake
+```brew install handbrake```
 
 When installation finishes, verify it by typing:
 
-HandBrakeCLI --version
+```HandBrakeCLI --version```
 
 ---
 
@@ -106,13 +106,13 @@ Python is required to run the script.
 
 Check if Python is already installed:
 
-python3 --version
+```python3 --version```
 
 If you see a version number (for example Python 3.12.x), you’re good.
 
 If not, install Python using Homebrew:
 
-brew install python
+```brew install python```
 
 ---
 
@@ -122,8 +122,8 @@ Now we will download the script from GitHub.
 
 In **Terminal**, type these commands one line at a time:
 
-git clone https://github.com/bamsejon/DVD-Rip-Automation-Script.git
-cd DVD-Rip-Automation-Script
+```git clone https://github.com/bamsejon/DVD-Rip-Automation-Script.git
+cd DVD-Rip-Automation-Script```
 
 You are now inside the project folder.
 
@@ -135,7 +135,7 @@ This script needs one extra Python module.
 
 In **Terminal**, type:
 
-pip3 install python-dotenv
+```pip3 install python-dotenv```
 
 ---
 
@@ -161,29 +161,48 @@ Helps keep OMDb maintained
 
 ---
 
-## Step 6: Create the .env file
+## Step 6:  Edit the .env file (using Terminal)
 
-We now need to store your OMDb API key.
-
-1. Open **Finder**
-2. Go to the folder:
-   DVD-Rip-Automation-Script
-3. Create a new file named:
-   .env
-
-Yes — the file name starts with a dot.
-
-Open the file in a text editor and add this line:
-
-OMDB_API_KEY=your_api_key_here
-
-Replace `your_api_key_here` with your actual API key.
-
-Save the file.
+The project already includes a .env file.
+You only need to edit it and add your OMDb API key.
 
 Important:
-- Do NOT commit this file
-- Make sure `.env` is listed in `.gitignore`
+	•	Files starting with a dot (.) are hidden in macOS Finder
+	•	You should edit this file using Terminal
+	•	The .env file must never be committed with a real API key
+
+Make sure you are in the project directory
+
+In Terminal, go to the project folder:
+```cd DVD-Rip-Automation-Script```
+
+Verify that the .env file exists:
+```ls -a````
+
+You should see .env in the list.
+
+Open the .env file for editing
+
+Open the file in a simple terminal editor:
+
+```nano .env```
+The screen will switch to a text editor.
+
+Step 9: Add your OMDb API key
+
+Inside the editor, add or update this line:
+```OMDB_API_KEY=your_api_key_here````
+
+Replace your_api_key_here with your actual OMDb API key.
+
+Step 10: Save and exit
+
+In nano:
+	•	Press Ctrl + O → save
+	•	Press Enter → confirm
+	•	Press Ctrl + X → exit
+
+You are now back in Terminal.
 
 ---
 
@@ -195,7 +214,7 @@ Important:
 
 Run the script by typing:
 
-python3 dvd_rip.py
+```python3 dvd_rip.py```
 
 ---
 
