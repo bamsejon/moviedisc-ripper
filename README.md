@@ -39,7 +39,9 @@ In **Terminal**, type the following and press **Enter**:
 ```git --version```
 
 If you see something like:
+
 ```git version 2.xx.x```  
+
 then Git is already installed and you can continue.
 
 If you see a message saying Git is not installed, macOS will usually offer to install **Command Line Developer Tools**.
@@ -179,10 +181,12 @@ In Terminal, go to the project folder:
 
 ```cd DVD-Rip-Automation-Script```
 
+
 Verify that the .env file exists:
 ```ls -a```
 
 You should see .env in the list.
+
 
 Open the .env file for editing
 
@@ -190,6 +194,7 @@ Open the file in a simple terminal editor:
 
 ```nano .env```
 The screen will switch to a text editor.
+
 
 Step 9: Add your OMDb API key
 
