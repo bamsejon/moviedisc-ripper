@@ -122,8 +122,9 @@ Now we will download the script from GitHub.
 
 In **Terminal**, type these commands one line at a time:
 
-```git clone https://github.com/bamsejon/DVD-Rip-Automation-Script.git
-cd DVD-Rip-Automation-Script```
+```git clone https://github.com/bamsejon/DVD-Rip-Automation-Script.git```
+
+```cd DVD-Rip-Automation-Script```
 
 You are now inside the project folder.
 
