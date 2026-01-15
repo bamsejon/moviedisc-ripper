@@ -2,7 +2,9 @@
 
 A fully automated DVD ripping and transcoding workflow for macOS, designed to produce Jellyfin-ready movie libraries with correct titles, metadata, subtitles, and folder structure.
 
-Insert a DVD → run the script → wait → disc ejects → movie appears in Jellyfin.
+Insert a DVD or Blu Ray → run the script → wait → disc ejects → movie appears in Jellyfin.
+
+THe script will first try to identify movie title from the discfinder-api, if not found it will try using the disc name from OMDB, if found it will add the checksum from the disc and imdb-id to the discfinder-api and add it. If the title cant be found in either OMDB or discfinder-api you will get an request where you can add the imdb-id.
 
 ---
 
