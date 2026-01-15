@@ -128,13 +128,24 @@ You are now inside the project folder.
 
 ---
 
-## Step 4: Install required Python dependency
+## Step 4: Install required Python dependencies
 
-This script needs one extra Python module.
+This script uses a few external Python modules that are not included by default.
 
-In **Terminal**, type:
+Make sure you are still inside the project directory:
 
-```pip3 install python-dotenv```
+```cd DVD-Rip-Automation-Script```
+
+Install the required dependencies by typing:
+
+```pip3 install python-dotenv requests```
+
+What these are used for:
+- `python-dotenv` → reads the `.env` file (OMDb API key)
+- `requests` → talks to the Disc Finder API and OMDb over HTTP
+
+If this step is skipped, the script will fail with:
+`ModuleNotFoundError: No module named 'requests'`
 
 ---
 
