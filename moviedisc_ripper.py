@@ -20,7 +20,7 @@ load_dotenv()
 
 OMDB_API_KEY = os.getenv("OMDB_API_KEY")
 if not OMDB_API_KEY:
-    print("❌ OMDB_API_KEY not set (check .env)")
+    print("❌ OMDB_API_KEY not set")
     sys.exit(1)
 
 DISCFINDER_API = "https://discfinder-api.bylund.cloud"
@@ -70,9 +70,6 @@ def detect_disc():
         if not os.path.ismount(path):
             continue
 
-        if name.upper().startswith(("BACKUP", "TIME MACHINE")):
-            continue
-
         try:
             contents = os.listdir(path)
         except PermissionError:
@@ -95,7 +92,16 @@ def normalize_title(volume):
 # OMDB
 # ==========================================================
 
+def omdb_by_title(title):
+    q = urllib.parse.quote(title)
+    url = f"https://www.omdbapi.com/?t={q}&type=movie&apikey={OMDB_API_KEY}"
+    with urllib.request.urlopen(url) as r:
+        data = json.loads(r.read().decode())
+    return data if data.get("Response") == "True" else None
+
 def omdb_by_imdb(imdb_id):
+    if not imdb_id:
+        return None
     url = f"https://www.omdbapi.com/?i={imdb_id}&apikey={OMDB_API_KEY}"
     with urllib.request.urlopen(url) as r:
         data = json.loads(r.read().decode())
@@ -121,7 +127,7 @@ def interactive_imdb_search():
         results = omdb_search(query)
         if not results:
             print("❌ No results found")
-            return unresolved_menu()
+            continue
 
         best = results[0]
         movie = omdb_by_imdb(best["imdbID"])
@@ -137,7 +143,7 @@ def interactive_imdb_search():
             return movie
 
 # ==========================================================
-# UNRESOLVED MENU
+# UNRESOLVED FALLBACK
 # ==========================================================
 
 def unresolved_menu():
@@ -180,11 +186,25 @@ def discfinder_post(disc_label, disc_type, checksum, movie):
         "disc_label": disc_label,
         "disc_type": disc_type,
         "checksum": checksum,
-        "imdb_id": movie["imdbID"],
+        "imdb_id": movie.get("imdbID"),
         "title": movie["Title"],
         "year": movie["Year"]
     }
     requests.post(f"{DISCFINDER_API}/discs", json=payload, timeout=5)
+
+def check_missing_assets(checksum):
+    r = requests.get(f"{DISCFINDER_API}/assets/status/{checksum}", timeout=5)
+    if r.status_code != 200:
+        return
+
+    status = r.json()
+    missing = [k for k in ("poster", "back", "banner") if not status.get(k)]
+
+    if missing:
+        print("\n🖼️  Cover art missing!")
+        print("   Missing:", ", ".join(missing))
+        print("💡 Upload while ripping:")
+        print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
 
 # ==========================================================
 # MAKEMKV
@@ -228,14 +248,6 @@ def transcode(input_file, output_file, preset, disc_type):
     run(cmd)
 
 # ==========================================================
-# EJECT
-# ==========================================================
-
-def eject(volume):
-    time.sleep(10)
-    subprocess.run(["diskutil", "eject", f"/Volumes/{volume}"], check=False)
-
-# ==========================================================
 # MAIN
 # ==========================================================
 
@@ -250,48 +262,44 @@ def main():
     print(f"🔐 Checksum: {checksum}")
 
     movie = None
-    api_hit = discfinder_lookup(checksum)
 
-    if api_hit:
-        imdb_id = api_hit.get("imdb_id")
+    api = discfinder_lookup(checksum)
 
-        if imdb_id:
-            movie = omdb_by_imdb(imdb_id)
-            if not movie:
-                movie = {
-                    "Title": api_hit["title"],
-                    "Year": api_hit["year"],
-                    "imdbID": None
-                }
+    if api:
+        print("✅ Found in Disc Finder API")
+        print(f"   Title: {api['title']} ({api['year']})")
+        if api.get("imdb_id"):
+            print(f"   IMDb:  https://www.imdb.com/title/{api['imdb_id']}/")
 
-            print("✅ Found in Disc Finder API")
-            print(f"   Title: {movie['Title']} ({movie['Year']})")
-            print(f"   IMDb:  https://www.imdb.com/title/{imdb_id}/")
-            print("⏱ Press SPACE and ENTER within 10 seconds if this is WRONG")
-
-        else:
-            movie = {
-                "Title": api_hit["title"],
-                "Year": api_hit["year"],
-                "imdbID": None
-            }
-
-            print("⚠️ Found in Disc Finder API (manual entry – NOT in IMDb)")
-            print(f"   Title: {movie['Title']} ({movie['Year']})")
-            print("   Source: manual entry")
-            print("⏱ Press SPACE and ENTER within 10 seconds to correct / search IMDb")
-
+        print("⏱ Press SPACE and ENTER within 10 seconds if this is WRONG")
         r, _, _ = select.select([sys.stdin], [], [], 10)
         if r:
             sys.stdin.readline()
+            api = None
+        else:
+            movie = omdb_by_imdb(api.get("imdb_id"))
+
+    if not movie:
+        print("❌ Disc not found in Disc Finder API")
+
+        guess = normalize_title(volume)
+        print(f"\n🔎 Trying disc name: {guess}")
+        movie = omdb_by_title(guess)
+
+        if movie:
+            print("\n🔍 Found via disc name:")
+            print(f"   Title: {movie['Title']} ({movie['Year']})")
+            print(f"   IMDb:  https://www.imdb.com/title/{movie['imdbID']}/")
+            if input("👉 Is this correct? [Y/n]: ").strip().lower() not in ("", "y", "yes"):
+                movie = interactive_imdb_search()
+        else:
             movie = interactive_imdb_search()
+
+        if not movie:
+            movie = unresolved_menu()
             if not movie:
                 sys.exit(1)
 
-    else:
-        movie = interactive_imdb_search()
-        if not movie:
-            sys.exit(1)
         discfinder_post(volume, disc_type, checksum, movie)
 
     title = sanitize_filename(movie["Title"])
@@ -299,6 +307,9 @@ def main():
 
     print(f"\n▶️ Identified: {title} ({year})")
 
+    check_missing_assets(checksum)
+
+    os.makedirs(MOVIES_DIR, exist_ok=True)
     movie_dir = os.path.join(MOVIES_DIR, f"{title} ({year})")
     os.makedirs(movie_dir, exist_ok=True)
 
@@ -309,8 +320,6 @@ def main():
     transcode(raw, output, preset, disc_type)
 
     os.remove(raw)
-    eject(volume)
-
     print(f"\n🎉 DONE → {movie_dir}")
 
 # ==========================================================
