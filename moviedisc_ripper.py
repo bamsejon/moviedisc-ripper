@@ -43,6 +43,8 @@ HANDBRAKE_AUDIO_PASSTHROUGH = [
     "--audio-fallback", "ac3"
 ]
 
+ASSET_KINDS = ("wrap", "poster", "back", "banner")
+
 # ==========================================================
 # HELPERS
 # ==========================================================
@@ -59,6 +61,16 @@ def sanitize_filename(name: str) -> str:
     for b in bad:
         name = name.replace(b, '')
     return name.strip()
+
+def wait_space_enter(seconds: int) -> bool:
+    """
+    Returns True if user pressed SPACE+ENTER (any line) within timeout.
+    """
+    r, _, _ = select.select([sys.stdin], [], [], seconds)
+    if r:
+        sys.stdin.readline()
+        return True
+    return False
 
 # ==========================================================
 # DISC DETECTION
@@ -190,20 +202,220 @@ def discfinder_post(disc_label, disc_type, checksum, movie):
         "title": movie["Title"],
         "year": movie["Year"]
     }
-    requests.post(f"{DISCFINDER_API}/discs", json=payload, timeout=5)
+    # best-effort; API may reply 409 if already exists
+    try:
+        requests.post(f"{DISCFINDER_API}/discs", json=payload, timeout=5)
+    except Exception:
+        pass
 
-def check_missing_assets(checksum):
-    r = requests.get(f"{DISCFINDER_API}/assets/status/{checksum}", timeout=5)
-    if r.status_code != 200:
-        return
+def asset_status_all(checksum):
+    """
+    Returns dict:
+      {
+        "sv": {"language":"Swedish", "wrap":true/false, "poster":..., ...},
+        ...
+      }
+    or {} if nothing exists.
+    """
+    try:
+        r = requests.get(f"{DISCFINDER_API}/assets/status/{checksum}", timeout=5)
+        if r.status_code != 200:
+            return {}
+        data = r.json()
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
-    status = r.json()
-    missing = [k for k in ("poster", "back", "banner") if not status.get(k)]
+def languages_with_any_assets(status: dict):
+    """
+    Keep only languages where at least one of ASSET_KINDS is True.
+    """
+    langs = []
+    for code, info in status.items():
+        if not isinstance(info, dict):
+            continue
+        if any(bool(info.get(k)) for k in ASSET_KINDS):
+            langs.append(code)
+    return langs
 
+def lang_name(status: dict, code: str) -> str:
+    info = status.get(code) or {}
+    n = info.get("language")
+    return n if n else code
+
+def choose_language_for_download(status: dict, checksum: str):
+    """
+    Returns selected lang_code (or None if no assets at all).
+    Selection rule:
+      - If 0 languages => None
+      - If 1 language => that language (with friendly message)
+      - If >1 => pick first (sorted by language name), allow 10s SPACE+ENTER to choose other
+    """
+    langs = languages_with_any_assets(status)
+    if not langs:
+        return None
+
+    # default = first by human name (stable)
+    langs_sorted = sorted(langs, key=lambda c: lang_name(status, c).lower())
+    default = langs_sorted[0]
+
+    if len(langs_sorted) == 1:
+        only_name = lang_name(status, default)
+        print("\n🖼️  Cover art found!")
+        print(f"   {only_name} will be downloaded as cover art (only available language).")
+        print("💡 Want to add another language? Upload here while ripping:")
+        print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
+        return default
+
+    default_name = lang_name(status, default)
+    print("\n🖼️  Cover art found in multiple languages!")
+    print(f"   Default: {default_name} (will be downloaded)")
+    print("⏱ Press SPACE and ENTER within 10 seconds to choose another language")
+    if not wait_space_enter(10):
+        return default
+
+    print("\n🌍 Select language to use for cover art:")
+    for i, code in enumerate(langs_sorted, start=1):
+        print(f"   [{i}] {lang_name(status, code)} ({code})")
+
+    choice = input("👉 Choice (number, ENTER = default): ").strip()
+    if not choice:
+        return default
+    try:
+        idx = int(choice)
+        if 1 <= idx <= len(langs_sorted):
+            return langs_sorted[idx - 1]
+    except ValueError:
+        pass
+    return default
+
+def raw_asset_url(checksum: str, lang_code: str, kind: str) -> str:
+    # server serves /assets/raw/<checksum>/<lang>/<kind>.jpg
+    return f"{DISCFINDER_API}/assets/raw/{checksum}/{lang_code}/{kind}.jpg"
+
+def download_file(url: str, dest_path: str) -> bool:
+    try:
+        r = requests.get(url, timeout=15)
+        if r.status_code != 200:
+            return False
+        with open(dest_path, "wb") as f:
+            f.write(r.content)
+        return True
+    except Exception:
+        return False
+
+def ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+def download_assets_for_language(status: dict, checksum: str, lang_code: str, movie_dir: str):
+    """
+    Downloads whatever exists for that language into movie_dir.
+    Also creates Jellyfin-friendly duplicates:
+      - poster.jpg
+      - back.jpg + backdrop.jpg (if back exists)
+      - banner.jpg
+      - wrap.jpg (not Jellyfin, but kept)
+    Returns list of (language_name, filename) downloaded.
+    """
+    info = status.get(lang_code) or {}
+    language = lang_name(status, lang_code)
+
+    existing_kinds = [k for k in ASSET_KINDS if info.get(k)]
+    if not existing_kinds:
+        return []
+
+    ensure_dir(movie_dir)
+    downloaded = []
+
+    # Friendly "missing" message for this language
+    missing = [k for k in ASSET_KINDS if not info.get(k)]
+    print(f"\n⬇️ Downloading cover art for {language} ({lang_code})...")
     if missing:
-        print("\n🖼️  Cover art missing!")
-        print("   Missing:", ", ".join(missing))
-        print("💡 Upload while ripping:")
+        # Keep this short and useful
+        have = [k for k in ASSET_KINDS if info.get(k)]
+        print(f"   Found:   {', '.join(have)}")
+        print(f"   Missing: {', '.join(missing)}")
+        print("💡 You can add more while ripping:")
+        print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
+
+    # Download each available kind
+    for kind in existing_kinds:
+        url = raw_asset_url(checksum, lang_code, kind)
+        # always save a language-suffixed copy
+        fname_lang = f"{kind}.{lang_code}.jpg"
+        dest_lang = os.path.join(movie_dir, fname_lang)
+        if download_file(url, dest_lang):
+            downloaded.append((language, fname_lang))
+
+        # Jellyfin-friendly canonical filenames (for selected language)
+        # (We overwrite to keep in sync with "selected language")
+        canonical_map = {
+            "poster": "poster.jpg",
+            "banner": "banner.jpg",
+            "wrap": "wrap.jpg",
+            "back": "back.jpg",
+        }
+        if kind in canonical_map:
+            dest_can = os.path.join(movie_dir, canonical_map[kind])
+            download_file(url, dest_can)
+            # and special: back -> backdrop.jpg too
+            if kind == "back":
+                dest_backdrop = os.path.join(movie_dir, "backdrop.jpg")
+                download_file(url, dest_backdrop)
+
+    return downloaded
+
+def diff_new_assets(initial: dict, final: dict):
+    """
+    Return list of tuples (lang_code, kind) that are new in final compared to initial.
+    New means: final[lang][kind] True and initial missing or False.
+    """
+    new_items = []
+    for lang_code, finfo in final.items():
+        if not isinstance(finfo, dict):
+            continue
+        iinfo = initial.get(lang_code) if isinstance(initial.get(lang_code), dict) else {}
+        for kind in ASSET_KINDS:
+            fin = bool(finfo.get(kind))
+            ini = bool(iinfo.get(kind)) if isinstance(iinfo, dict) else False
+            if fin and not ini:
+                new_items.append((lang_code, kind))
+    return new_items
+
+def download_new_assets(final_status: dict, checksum: str, movie_dir: str, new_items: list):
+    """
+    Download new assets (added during ripping) into movie_dir as <kind>.<lang>.jpg.
+    Also add the "backdrop.<lang>.jpg" copy when kind == back.
+    Returns list of (language_name, filename) downloaded.
+    """
+    ensure_dir(movie_dir)
+    downloaded = []
+    for lang_code, kind in new_items:
+        language = lang_name(final_status, lang_code)
+        url = raw_asset_url(checksum, lang_code, kind)
+
+        fname = f"{kind}.{lang_code}.jpg"
+        dest = os.path.join(movie_dir, fname)
+        if download_file(url, dest):
+            downloaded.append((language, fname))
+
+        if kind == "back":
+            fname2 = f"backdrop.{lang_code}.jpg"
+            dest2 = os.path.join(movie_dir, fname2)
+            if download_file(url, dest2):
+                downloaded.append((language, fname2))
+
+    return downloaded
+
+def show_missing_assets_prompt_if_none(status: dict, checksum: str):
+    """
+    If checksum dir missing OR lang dir missing OR lang dirs exist but contain no supported images
+    => status will be {} or no langs with any assets. Treat as no images.
+    """
+    langs = languages_with_any_assets(status)
+    if not langs:
+        print("\n🖼️  No cover art found for this disc yet.")
+        print("💡 Why not scan/photo the cover while ripping and upload it?")
         print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
 
 # ==========================================================
@@ -265,6 +477,10 @@ def main():
 
     api = discfinder_lookup(checksum)
 
+    # -------------------------------
+    # DO NOT CHANGE THIS LOGIC:
+    # - If API hit -> show title + 10s "wrong" window
+    # -------------------------------
     if api:
         print("✅ Found in Disc Finder API")
         print(f"   Title: {api['title']} ({api['year']})")
@@ -307,19 +523,63 @@ def main():
 
     print(f"\n▶️ Identified: {title} ({year})")
 
-    check_missing_assets(checksum)
-
+    # Create destination dir early (needed for cover downloads BEFORE ripping)
     os.makedirs(MOVIES_DIR, exist_ok=True)
     movie_dir = os.path.join(MOVIES_DIR, f"{title} ({year})")
     os.makedirs(movie_dir, exist_ok=True)
 
     output = os.path.join(movie_dir, f"{title} ({year}).mkv")
 
+    # ======================================================
+    # COVER ART PHASE 1 (BEFORE RIP)
+    # - If none => prompt upload link
+    # - If some => select language (or only language) and download what exists
+    # - Snapshot initial status for end-of-rip diff
+    # ======================================================
+
+    status_before = asset_status_all(checksum)
+
+    # Treat all "missing folder / missing lang / empty lang" as "no images"
+    show_missing_assets_prompt_if_none(status_before, checksum)
+
+    selected_lang = choose_language_for_download(status_before, checksum)
+    if selected_lang:
+        download_assets_for_language(status_before, checksum, selected_lang, movie_dir)
+
+    # Snapshot AFTER we did pre-rip downloads (still the API state before ripping starts)
+    initial_asset_state = asset_status_all(checksum)
+
+    # ======================================================
+    # RIP + TRANSCODE
+    # ======================================================
+
     raw = rip_with_makemkv()
     preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
     transcode(raw, output, preset, disc_type)
 
-    os.remove(raw)
+    try:
+        os.remove(raw)
+    except FileNotFoundError:
+        pass
+
+    # ======================================================
+    # COVER ART PHASE 2 (AFTER ENCODE)
+    # - If new assets appeared during ripping => download them
+    # - Print a single friendly “thank you” message
+    # ======================================================
+
+    final_asset_state = asset_status_all(checksum)
+    new_items = diff_new_assets(initial_asset_state, final_asset_state)
+
+    if new_items:
+        downloaded_new = download_new_assets(final_asset_state, checksum, movie_dir, new_items)
+        if downloaded_new:
+            print("\n💚 I noticed that new cover art was added during the ripping.")
+            print("\n⬇️ Downloaded:")
+            for language, fname in downloaded_new:
+                print(f"   • {language} – {fname}")
+            print("\n🙏 Was it you? If so – thank you so much for contributing to the community!")
+
     print(f"\n🎉 DONE → {movie_dir}")
 
 # ==========================================================
