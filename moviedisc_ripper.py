@@ -8,6 +8,7 @@ import hashlib
 import subprocess
 import urllib.parse
 import urllib.request
+import urllib.error
 import requests
 import select
 from dotenv import load_dotenv
@@ -44,6 +45,9 @@ HANDBRAKE_AUDIO_PASSTHROUGH = [
 ]
 
 ASSET_KINDS = ("wrap", "poster", "back", "banner")
+
+# OMDb timeout (seconds). Keeps the script from "hanging" too long.
+OMDB_TIMEOUT = 12
 
 # ==========================================================
 # HELPERS
@@ -114,29 +118,56 @@ def normalize_title(volume):
     return title.strip()
 
 # ==========================================================
-# OMDB
+# OMDB (robust wrappers)
 # ==========================================================
+
+def _omdb_get(url: str):
+    """
+    Returns parsed JSON dict on success, None on any OMDb/network failure.
+    Never raises (so script doesn't crash if OMDb is down).
+    """
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "DVD-Rip-Automation-Script/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=OMDB_TIMEOUT) as r:
+            data = json.loads(r.read().decode())
+        return data
+    except urllib.error.HTTPError as e:
+        # 503 etc
+        print(f"⚠️  OMDb error: HTTP {e.code} ({e.reason})")
+        return None
+    except urllib.error.URLError as e:
+        print(f"⚠️  OMDb network error: {e.reason}")
+        return None
+    except Exception as e:
+        print(f"⚠️  OMDb error: {e}")
+        return None
 
 def omdb_by_title(title):
     q = urllib.parse.quote(title)
     url = f"https://www.omdbapi.com/?t={q}&type=movie&apikey={OMDB_API_KEY}"
-    with urllib.request.urlopen(url) as r:
-        data = json.loads(r.read().decode())
+    data = _omdb_get(url)
+    if not data:
+        return None
     return data if data.get("Response") == "True" else None
 
 def omdb_by_imdb(imdb_id):
     if not imdb_id:
         return None
     url = f"https://www.omdbapi.com/?i={imdb_id}&apikey={OMDB_API_KEY}"
-    with urllib.request.urlopen(url) as r:
-        data = json.loads(r.read().decode())
+    data = _omdb_get(url)
+    if not data:
+        return None
     return data if data.get("Response") == "True" else None
 
 def omdb_search(query):
     q = urllib.parse.quote(query)
     url = f"https://www.omdbapi.com/?s={q}&type=movie&apikey={OMDB_API_KEY}"
-    with urllib.request.urlopen(url) as r:
-        data = json.loads(r.read().decode())
+    data = _omdb_get(url)
+    if not data:
+        return None  # important: distinguish "no results" vs "OMDb down"
     return data.get("Search", []) if data.get("Response") == "True" else []
 
 # ==========================================================
@@ -145,19 +176,30 @@ def omdb_search(query):
 
 def interactive_imdb_search():
     while True:
-        query = input("\n🎬 Enter movie title to search IMDb (ENTER to abort): ").strip()
+        query = input("\n🎬 Enter movie title to search IMDb via OMDb (ENTER to abort): ").strip()
         if not query:
             return None
 
         results = omdb_search(query)
+
+        # OMDb down / network issue
+        if results is None:
+            print("⚠️  OMDb is unavailable right now.")
+            print("💡 Tip: Use manual IMDb ID mode instead (tt1234567).")
+            return None
+
         if not results:
             print("❌ No results found")
             continue
 
         best = results[0]
         movie = omdb_by_imdb(best["imdbID"])
-        if not movie:
-            continue
+
+        # If OMDb fails on the lookup call, bail out to manual option
+        if movie is None:
+            print("⚠️  OMDb became unavailable while fetching details.")
+            print("💡 Tip: Use manual IMDb ID mode instead (tt1234567).")
+            return None
 
         print("\n🔍 IMDb match:")
         print(f"   Title: {movie['Title']} ({movie['Year']})")
@@ -168,23 +210,42 @@ def interactive_imdb_search():
             return movie
 
 # ==========================================================
-# UNRESOLVED FALLBACK
+# UNRESOLVED FALLBACK (true manual mode)
 # ==========================================================
 
 def unresolved_menu():
-    print("\n❌ Could not reliably identify this movie.")
-    print("Do you want to search again or enter name manually?")
-    print("[S] Search IMDb again")
-    print("[M] Enter name manually")
+    print("\n❌ Could not reliably identify this movie (or OMDb is down).")
+    print("Choose how to continue:")
+    print("[I] Enter IMDb ID manually (recommended)")
+    print("[M] Enter title/year manually (no IMDb)")
     print("[E] Exit")
 
     choice = input("👉 Choice: ").strip().lower()
 
-    if choice == "s":
-        return interactive_imdb_search()
+    if choice == "i":
+        imdb = input("🎬 Enter IMDb ID (e.g. tt0358273): ").strip()
+        if not imdb.startswith("tt") or not imdb[2:].isdigit():
+            print("❌ Invalid IMDb ID format. It must look like tt1234567.")
+            return unresolved_menu()
+
+        title = input("✏️ Enter movie title (as on IMDb): ").strip()
+        if not title:
+            print("❌ Title is required in manual IMDb mode.")
+            return unresolved_menu()
+
+        year = input("✏️ Enter year (optional): ").strip()
+        return {
+            "Title": title,
+            "Year": year or "Unknown",
+            "imdbID": imdb
+        }
 
     if choice == "m":
         title = input("✏️ Enter movie title: ").strip()
+        if not title:
+            print("❌ Title is required.")
+            return unresolved_menu()
+
         year = input("✏️ Enter year (optional): ").strip()
         return {
             "Title": title,
@@ -344,24 +405,20 @@ def download_assets_for_language(status: dict, checksum: str, lang_code: str, mo
     missing = [k for k in ASSET_KINDS if not info.get(k)]
     print(f"\n⬇️ Downloading cover art for {language} ({lang_code})...")
     if missing:
-        # Keep this short and useful
         have = [k for k in ASSET_KINDS if info.get(k)]
         print(f"   Found:   {', '.join(have)}")
         print(f"   Missing: {', '.join(missing)}")
         print("💡 You can add more while ripping:")
         print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
 
-    # Download each available kind
     for kind in existing_kinds:
         url = raw_asset_url(checksum, lang_code, kind)
-        # always save a language-suffixed copy
+
         fname_lang = f"{kind}.{lang_code}.jpg"
         dest_lang = os.path.join(movie_dir, fname_lang)
         if download_file(url, dest_lang):
             downloaded.append((language, fname_lang))
 
-        # Jellyfin-friendly canonical filenames (for selected language)
-        # (We overwrite to keep in sync with "selected language")
         canonical_map = {
             "poster": "poster.jpg",
             "banner": "banner.jpg",
@@ -371,7 +428,6 @@ def download_assets_for_language(status: dict, checksum: str, lang_code: str, mo
         if kind in canonical_map:
             dest_can = os.path.join(movie_dir, canonical_map[kind])
             download_file(url, dest_can)
-            # and special: back -> backdrop.jpg too
             if kind == "back":
                 dest_backdrop = os.path.join(movie_dir, "backdrop.jpg")
                 download_file(url, dest_backdrop)
@@ -442,7 +498,6 @@ def rip_with_makemkv():
         if os.path.isfile(p):
             os.remove(p)
 
-# ### CHANGED ###
     # Dump ALL titles instead of just title 0
     run([MAKE_MKV_PATH, "mkv", "disc:0", "all", TEMP_DIR])
 
@@ -456,7 +511,6 @@ def rip_with_makemkv():
         print("❌ No MKV produced")
         sys.exit(1)
 
- # ### CHANGED ###
     # Pick the largest MKV = main feature
     mkvs.sort(key=lambda p: os.path.getsize(p), reverse=True)
     main_mkv = mkvs[0]
@@ -485,7 +539,7 @@ def transcode(input_file, output_file, preset, disc_type):
         "--format", "mkv"
     ]
 
-    # Blu-ray: tillåt passthrough där det finns
+    # Blu-ray: allow passthrough where it exists
     if disc_type == "BLURAY":
         cmd.extend(HANDBRAKE_AUDIO_PASSTHROUGH)
 
@@ -506,7 +560,6 @@ def main():
     print(f"🔐 Checksum: {checksum}")
 
     movie = None
-
     api = discfinder_lookup(checksum)
 
     # -------------------------------
@@ -525,6 +578,7 @@ def main():
             sys.stdin.readline()
             api = None
         else:
+            # OMDb might be down; if so we still continue to manual later
             movie = omdb_by_imdb(api.get("imdb_id"))
 
     if not movie:
@@ -541,6 +595,7 @@ def main():
             if input("👉 Is this correct? [Y/n]: ").strip().lower() not in ("", "y", "yes"):
                 movie = interactive_imdb_search()
         else:
+            # OMDb may be down -> interactive_imdb_search will detect and return None
             movie = interactive_imdb_search()
 
         if not movie:
@@ -582,7 +637,7 @@ def main():
 
     raw = rip_with_makemkv()
 
-    eject_disc(volume)   # ⏏️ NEW: eject disc after rip
+    eject_disc(volume)   # ⏏️ eject disc after rip
 
     preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
     transcode(raw, output, preset, disc_type)
