@@ -453,26 +453,39 @@ def diff_new_assets(initial: dict, final: dict):
 
 def download_new_assets(final_status: dict, checksum: str, movie_dir: str, new_items: list):
     """
-    Download new assets (added during ripping) into movie_dir as <kind>.<lang>.jpg.
-    Also add the "backdrop.<lang>.jpg" copy when kind == back.
-    Returns list of (language_name, filename) downloaded.
+    Download new assets (added during ripping) and overwrite canonical filenames:
+      poster.jpg
+      back.jpg
+      backdrop.jpg
+      banner.jpg
+      wrap.jpg
     """
     ensure_dir(movie_dir)
     downloaded = []
+
+    canonical_map = {
+        "poster": "poster.jpg",
+        "banner": "banner.jpg",
+        "wrap": "wrap.jpg",
+        "back": "back.jpg",
+    }
+
     for lang_code, kind in new_items:
         language = lang_name(final_status, lang_code)
         url = raw_asset_url(checksum, lang_code, kind)
 
-        fname = f"{kind}.{lang_code}.jpg"
-        dest = os.path.join(movie_dir, fname)
-        if download_file(url, dest):
-            downloaded.append((language, fname))
+        if kind not in canonical_map:
+            continue
 
+        dest = os.path.join(movie_dir, canonical_map[kind])
+        if download_file(url, dest):
+            downloaded.append((language, canonical_map[kind]))
+
+        # special case: back → backdrop.jpg
         if kind == "back":
-            fname2 = f"backdrop.{lang_code}.jpg"
-            dest2 = os.path.join(movie_dir, fname2)
-            if download_file(url, dest2):
-                downloaded.append((language, fname2))
+            dest_backdrop = os.path.join(movie_dir, "backdrop.jpg")
+            if download_file(url, dest_backdrop):
+                downloaded.append((language, "backdrop.jpg"))
 
     return downloaded
 
