@@ -72,6 +72,19 @@ def wait_space_enter(seconds: int) -> bool:
         return True
     return False
 
+def eject_disc(volume_name: str):
+    """
+    Eject disc on macOS using diskutil.
+    """
+    print(f"\n⏏️  Ejecting disc: {volume_name}")
+    try:
+        subprocess.run(
+            ["diskutil", "eject", f"/Volumes/{volume_name}"],
+            check=True
+        )
+    except subprocess.CalledProcessError:
+        print("⚠️  Failed to eject disc (continuing anyway)")
+
 # ==========================================================
 # DISC DETECTION
 # ==========================================================
@@ -462,15 +475,17 @@ def transcode(input_file, output_file, preset, disc_type):
         "-i", input_file,
         "-o", output_file,
         "--preset", preset,
+
+        "--all-audio",
+        "--audio-lang-list", "eng",
+
         "--all-subtitles",
         "--subtitle-burned=0",
-        "--subtitle-default=none",
+
         "--format", "mkv"
     ]
 
-    # ### CHANGED ###
-    # Always use classic HandBrake behavior for Blu-ray.
-    # No VideoToolbox, no explicit encoder flags.
+    # Blu-ray: tillåt passthrough där det finns
     if disc_type == "BLURAY":
         cmd.extend(HANDBRAKE_AUDIO_PASSTHROUGH)
 
@@ -566,6 +581,9 @@ def main():
     # ======================================================
 
     raw = rip_with_makemkv()
+
+    eject_disc(volume)   # ⏏️ NEW: eject disc after rip
+
     preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
     transcode(raw, output, preset, disc_type)
 
