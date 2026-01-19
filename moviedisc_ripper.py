@@ -62,6 +62,21 @@ OMDB_TIMEOUT = 12
 # ==========================================================
 # HELPERS
 # ==========================================================
+def legacy_checksum_exists(legacy_checksum: str) -> bool:
+    # 1️⃣ Finns i DiscFinder API / DB?
+    try:
+        r = requests.get(
+            f"{DISCFINDER_API}/lookup",
+            params={"checksum": legacy_checksum},
+            timeout=3
+        )
+        if r.status_code == 200:
+            return True
+    except Exception:
+        pass
+
+ 
+    return False
 
 def run(cmd):
     print("\n>>>", " ".join(cmd))
@@ -152,6 +167,8 @@ def ensure_mount_or_die():
         sys.exit(1)
 
     print(f"✅ Mounted SMB share: {SMB_MOUNT_PATH}")
+
+    
 
 # ==========================================================
 # DISC DETECTION
@@ -636,22 +653,84 @@ def transcode(input_file, output_file, preset, disc_type):
     run(cmd)
 
 # ==========================================================
+# CALCULATE CHECKSUM FOR UNIQUE DISC
+# ==========================================================
+
+def disc_fingerprint(volume: str, disc_type: str) -> str:
+    base = f"/Volumes/{volume}"
+
+    files = []
+    total_size = 0
+
+    for root, dirs, filenames in os.walk(base, onerror=lambda e: None):
+        for f in filenames:
+            path = os.path.join(root, f)
+            try:
+                st = os.stat(path)
+            except FileNotFoundError:
+                continue
+
+            rel = os.path.relpath(path, base)
+            files.append(rel)
+            total_size += st.st_size
+
+    files.sort()
+
+    fingerprint = {
+        "disc_type": disc_type,
+        "file_count": len(files),
+        "total_size": total_size,
+        "files": files[:200]  # safety cap
+    }
+
+    return sha256(json.dumps(fingerprint, separators=(",", ":"), sort_keys=True))
+
+
+# ==========================================================
 # MAIN
 # ==========================================================
 
 def main():
-    confirmed = False
+    movie = None
     volume, disc_type = detect_disc()
     if not volume:
         print("❌ No disc detected")
         sys.exit(1)
 
     print(f"\n🎞 Disc: {volume}")
-    checksum = sha256(volume)
-    print(f"🔐 Checksum: {checksum}")
 
-    movie = None
-    api = discfinder_lookup(checksum)
+    legacy_checksum = sha256(volume)
+    new_checksum = disc_fingerprint(volume, disc_type)
+
+    print(f"🔐 New checksum: {new_checksum}")
+
+    legacy_exists = legacy_checksum_exists(legacy_checksum)
+    if legacy_exists:
+        print(f"🧓 Legacy checksum detected: {legacy_checksum}")
+
+    api = discfinder_lookup(new_checksum)
+
+    # ♻️ migrate old checksum → new checksum
+    if not api and legacy_exists:
+        legacy = discfinder_lookup(legacy_checksum)
+        if legacy:
+            print("♻️ Legacy checksum detected – upgrading in place")
+
+            r = requests.put(
+                f"{DISCFINDER_API}/discs/{legacy_checksum}/checksum",
+                json={"new_checksum": new_checksum},
+                timeout=5
+            )
+
+            if r.status_code != 200:
+                print("❌ Failed to upgrade checksum")
+                print(r.text)
+                sys.exit(1)
+
+            print("✅ Checksum upgraded")
+            api = discfinder_lookup(new_checksum)
+
+    checksum = new_checksum
 
     # ✅ FIX: remember whether this disc was missing in API initially
     needs_post = (api is None)
@@ -689,11 +768,8 @@ def main():
             print(f"   Title: {movie['Title']} ({movie['Year']})")
             print(f"   IMDb:  https://www.imdb.com/title/{movie['imdbID']}/")
             resp = input("👉 Is this correct? [Y/n]: ").strip().lower()
-            if resp in ("", "y", "yes"):
-                confirmed = True
-            else:
+            if resp not in ("", "y", "yes"):
                 movie = interactive_imdb_search()
-                confirmed = movie is not None
         else:
             # OMDb may be down -> interactive_imdb_search will detect and return None
             movie = interactive_imdb_search()
@@ -704,11 +780,10 @@ def main():
                 sys.exit(1)
 
     # ✅ FIX: post if (and only if) it was missing initially OR user marked API hit as wrong
-    if needs_post and confirmed:
+    if needs_post:
         print("📤 Posting disc to DiscFinder API...")
         discfinder_post(volume, disc_type, checksum, movie)
-    else:
-        print(f"⚠️ Not posting (needs_post={needs_post}, confirmed={confirmed})")
+
 
     title = sanitize_filename(movie["Title"])
     year = movie["Year"]
