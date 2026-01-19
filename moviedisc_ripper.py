@@ -36,6 +36,16 @@ HANDBRAKE_CLI_PATH = "/opt/homebrew/bin/HandBrakeCLI"
 TEMP_DIR = "/Volumes/Jonte/rip/tmp"
 MOVIES_DIR = "/Volumes/nfs-share/media/rippat/movies"
 
+# ==========================================================
+# SMB SHARE (macOS, Keychain)
+# Fill in yourself:
+# - SMB_SHARE:   SMB URL used by mount_smbfs
+# - SMB_MOUNT_PATH: local mountpoint (should match the /Volumes/... used by MOVIES_DIR)
+# ==========================================================
+
+SMB_SHARE = "//delis.bylund.cloud/nfs-share"
+SMB_MOUNT_PATH = "/Volumes/nfs-share"
+
 HANDBRAKE_PRESET_DVD = "HQ 720p30 Surround"
 HANDBRAKE_PRESET_BD  = "HQ 1080p30 Surround"
 
@@ -88,6 +98,60 @@ def eject_disc(volume_name: str):
         )
     except subprocess.CalledProcessError:
         print("⚠️  Failed to eject disc (continuing anyway)")
+
+def ensure_mount_or_die():
+    """
+    macOS-only: Ensure SMB share is mounted.
+
+    Uses Keychain credentials automatically via mount_smbfs.
+    - Checks SMB_MOUNT_PATH is mounted
+    - If not, tries to mount SMB_SHARE at SMB_MOUNT_PATH
+    - If mount fails, exits script with clear error
+    """
+    # Important: MOVIES_DIR lives under SMB_MOUNT_PATH, so we must ensure
+    # the mount exists before using MOVIES_DIR.
+    if os.path.ismount(SMB_MOUNT_PATH):
+        return
+
+    # Create mount point if it doesn't exist
+    try:
+        os.makedirs(SMB_MOUNT_PATH, exist_ok=True)
+    except Exception as e:
+        print("❌ Could not create mount path")
+        print(f"   Mount path: {SMB_MOUNT_PATH}")
+        print(f"   Error: {e}")
+        sys.exit(1)
+
+    print(f"🔌 SMB mount missing: {SMB_MOUNT_PATH}")
+    print(f"➡️  Attempting to mount: {SMB_SHARE} → {SMB_MOUNT_PATH}")
+
+    try:
+        p = subprocess.run(
+            ["mount_smbfs", SMB_SHARE, SMB_MOUNT_PATH],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        print("\n❌ FAILED TO MOUNT SMB SHARE")
+        print(f"   Share: {SMB_SHARE}")
+        print(f"   Mount: {SMB_MOUNT_PATH}")
+        if e.stdout:
+            print("\nstdout:")
+            print(e.stdout)
+        if e.stderr:
+            print("\nstderr:")
+            print(e.stderr)
+        sys.exit(1)
+
+    # Verify mount
+    if not os.path.ismount(SMB_MOUNT_PATH):
+        print("\n❌ Mount command executed but share is still not mounted.")
+        print(f"   Share: {SMB_SHARE}")
+        print(f"   Mount: {SMB_MOUNT_PATH}")
+        sys.exit(1)
+
+    print(f"✅ Mounted SMB share: {SMB_MOUNT_PATH}")
 
 # ==========================================================
 # DISC DETECTION
@@ -276,11 +340,24 @@ def discfinder_post(disc_label, disc_type, checksum, movie):
         "title": movie["Title"],
         "year": movie["Year"]
     }
-    # best-effort; API may reply 409 if already exists
+
     try:
-        requests.post(f"{DISCFINDER_API}/discs", json=payload, timeout=5)
-    except Exception:
-        pass
+        r = requests.post(
+            f"{DISCFINDER_API}/discs",
+            json=payload,
+            timeout=5
+        )
+
+        print(f"📡 POST /discs → HTTP {r.status_code}")
+        if r.text:
+            print(f"📡 Response: {r.text}")
+
+        if r.status_code not in (200, 201, 409):
+            print("❌ DiscFinder API returned unexpected status!")
+
+    except Exception as e:
+        print("❌ FAILED to post to DiscFinder API")
+        print(e)
 
 def asset_status_all(checksum):
     """
@@ -563,6 +640,7 @@ def transcode(input_file, output_file, preset, disc_type):
 # ==========================================================
 
 def main():
+    confirmed = False
     volume, disc_type = detect_disc()
     if not volume:
         print("❌ No disc detected")
@@ -574,6 +652,9 @@ def main():
 
     movie = None
     api = discfinder_lookup(checksum)
+
+    # ✅ FIX: remember whether this disc was missing in API initially
+    needs_post = (api is None)
 
     # -------------------------------
     # DO NOT CHANGE THIS LOGIC:
@@ -590,6 +671,8 @@ def main():
         if r:
             sys.stdin.readline()
             api = None
+            # ✅ FIX: user said it's wrong -> treat as missing -> should post when identified
+            needs_post = True
         else:
             # OMDb might be down; if so we still continue to manual later
             movie = omdb_by_imdb(api.get("imdb_id"))
@@ -605,8 +688,12 @@ def main():
             print("\n🔍 Found via disc name:")
             print(f"   Title: {movie['Title']} ({movie['Year']})")
             print(f"   IMDb:  https://www.imdb.com/title/{movie['imdbID']}/")
-            if input("👉 Is this correct? [Y/n]: ").strip().lower() not in ("", "y", "yes"):
+            resp = input("👉 Is this correct? [Y/n]: ").strip().lower()
+            if resp in ("", "y", "yes"):
+                confirmed = True
+            else:
                 movie = interactive_imdb_search()
+                confirmed = movie is not None
         else:
             # OMDb may be down -> interactive_imdb_search will detect and return None
             movie = interactive_imdb_search()
@@ -616,12 +703,20 @@ def main():
             if not movie:
                 sys.exit(1)
 
+    # ✅ FIX: post if (and only if) it was missing initially OR user marked API hit as wrong
+    if needs_post and confirmed:
+        print("📤 Posting disc to DiscFinder API...")
         discfinder_post(volume, disc_type, checksum, movie)
+    else:
+        print(f"⚠️ Not posting (needs_post={needs_post}, confirmed={confirmed})")
 
     title = sanitize_filename(movie["Title"])
     year = movie["Year"]
 
     print(f"\n▶️ Identified: {title} ({year})")
+
+    # Ensure SMB mount before touching MOVIES_DIR
+    ensure_mount_or_die()
 
     # Create destination dir early (needed for cover downloads BEFORE ripping)
     os.makedirs(MOVIES_DIR, exist_ok=True)
