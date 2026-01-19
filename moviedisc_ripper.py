@@ -11,7 +11,31 @@ import urllib.request
 import urllib.error
 import requests
 import select
+import argparse
 from dotenv import load_dotenv
+
+# ==========================================================
+# ARGS
+# ==========================================================
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="DVD / Blu-ray ripping automation"
+    )
+
+    parser.add_argument(
+        "--coverart",
+        action="store_true",
+        help="Only download cover art, do not rip or transcode"
+    )
+
+    parser.add_argument(
+        "--lang",
+        type=str,
+        help="Language code for cover art (e.g. sv, en, de)"
+    )
+
+    return parser.parse_args()
 
 # ==========================================================
 # ENV
@@ -54,11 +78,32 @@ HANDBRAKE_AUDIO_PASSTHROUGH = [
     "--audio-fallback", "ac3"
 ]
 
-ASSET_KINDS = ("wrap", "poster", "back", "banner")
+ASSET_KINDS = ("wrap", "poster", "banner")
 
 # OMDb timeout (seconds). Keeps the script from "hanging" too long.
 OMDB_TIMEOUT = 12
 
+MIN_MAIN_MOVIE_SECONDS = 45 * 60  # 45 minutes
+
+def get_duration_seconds(path: str) -> float:
+    """
+    Uses ffprobe to return duration in seconds for an MKV.
+    Requires ffprobe (ffmpeg) installed and in PATH.
+    """
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                path
+            ],
+            text=True
+        )
+        data = json.loads(out)
+        return float(data["format"]["duration"])
+    except Exception:
+        return 0.0
 # ==========================================================
 # HELPERS
 # ==========================================================
@@ -81,6 +126,48 @@ def legacy_checksum_exists(legacy_checksum: str) -> bool:
 def run(cmd):
     print("\n>>>", " ".join(cmd))
     subprocess.run(cmd, check=True)
+    
+
+def run_makemkv(cmd):
+    """
+    Runs MakeMKV and aborts immediately if disc read errors are detected.
+    """
+    print("\n>>>", " ".join(cmd))
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace"
+    )
+
+    for line in proc.stdout:
+        print(line, end="")
+
+        l = line.lower()
+        if (
+            "medium error" in l
+            or "uncorrectable error" in l
+            or "scsi error" in l
+        ):
+            print("\n❌ DISC READ ERROR DETECTED")
+            print("💿 The disc appears to be scratched or unreadable.")
+            print("🛑 Aborting rip before transcoding.")
+            print("💡 Tip: Clean the disc or try another drive.")
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            sys.exit(1)
+
+    proc.wait()
+
+    if proc.returncode != 0:
+        print("❌ MakeMKV failed with a non-zero exit code.")
+        sys.exit(1)
+
 
 def sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -477,13 +564,8 @@ def ensure_dir(path: str):
 
 def download_assets_for_language(status: dict, checksum: str, lang_code: str, movie_dir: str):
     """
-    Downloads whatever exists for that language into movie_dir.
-    Also creates Jellyfin-friendly duplicates:
-      - poster.jpg
-      - back.jpg + backdrop.jpg (if back exists)
-      - banner.jpg
-      - wrap.jpg (not Jellyfin, but kept)
-    Returns list of (language_name, filename) downloaded.
+    Downloads cover art for the SELECTED language only.
+    Files are saved using canonical names (no language suffixes).
     """
     info = status.get(lang_code) or {}
     language = lang_name(status, lang_code)
@@ -495,36 +577,24 @@ def download_assets_for_language(status: dict, checksum: str, lang_code: str, mo
     ensure_dir(movie_dir)
     downloaded = []
 
-    # Friendly "missing" message for this language
-    missing = [k for k in ASSET_KINDS if not info.get(k)]
     print(f"\n⬇️ Downloading cover art for {language} ({lang_code})...")
-    if missing:
-        have = [k for k in ASSET_KINDS if info.get(k)]
-        print(f"   Found:   {', '.join(have)}")
-        print(f"   Missing: {', '.join(missing)}")
-        print("💡 You can add more while ripping:")
-        print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
+
+    # Canonical Jellyfin-style filenames
+    canonical_map = {
+        "poster": "poster.jpg",
+        "banner": "banner.jpg",
+        "wrap": "backdrop.jpg",
+    }
 
     for kind in existing_kinds:
+        if kind not in canonical_map:
+            continue
+
         url = raw_asset_url(checksum, lang_code, kind)
+        dest = os.path.join(movie_dir, canonical_map[kind])
 
-        fname_lang = f"{kind}.{lang_code}.jpg"
-        dest_lang = os.path.join(movie_dir, fname_lang)
-        if download_file(url, dest_lang):
-            downloaded.append((language, fname_lang))
-
-        canonical_map = {
-            "poster": "poster.jpg",
-            "banner": "banner.jpg",
-            "wrap": "wrap.jpg",
-            "back": "back.jpg",
-        }
-        if kind in canonical_map:
-            dest_can = os.path.join(movie_dir, canonical_map[kind])
-            download_file(url, dest_can)
-            if kind == "back":
-                dest_backdrop = os.path.join(movie_dir, "backdrop.jpg")
-                download_file(url, dest_backdrop)
+        if download_file(url, dest):
+            downloaded.append((language, canonical_map[kind]))
 
     return downloaded
 
@@ -546,40 +616,24 @@ def diff_new_assets(initial: dict, final: dict):
     return new_items
 
 def download_new_assets(final_status: dict, checksum: str, movie_dir: str, new_items: list):
-    """
-    Download new assets (added during ripping) and overwrite canonical filenames:
-      poster.jpg
-      back.jpg
-      backdrop.jpg
-      banner.jpg
-      wrap.jpg
-    """
     ensure_dir(movie_dir)
     downloaded = []
 
     canonical_map = {
         "poster": "poster.jpg",
         "banner": "banner.jpg",
-        "wrap": "wrap.jpg",
-        "back": "back.jpg",
+        "wrap": "backdrop.jpg",
     }
 
     for lang_code, kind in new_items:
-        language = lang_name(final_status, lang_code)
-        url = raw_asset_url(checksum, lang_code, kind)
-
         if kind not in canonical_map:
             continue
 
+        url = raw_asset_url(checksum, lang_code, kind)
         dest = os.path.join(movie_dir, canonical_map[kind])
-        if download_file(url, dest):
-            downloaded.append((language, canonical_map[kind]))
 
-        # special case: back → backdrop.jpg
-        if kind == "back":
-            dest_backdrop = os.path.join(movie_dir, "backdrop.jpg")
-            if download_file(url, dest_backdrop):
-                downloaded.append((language, "backdrop.jpg"))
+        if download_file(url, dest):
+            downloaded.append((lang_name(final_status, lang_code), canonical_map[kind]))
 
     return downloaded
 
@@ -594,6 +648,7 @@ def show_missing_assets_prompt_if_none(status: dict, checksum: str):
         print("💡 Why not scan/photo the cover while ripping and upload it?")
         print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
 
+
 # ==========================================================
 # MAKEMKV
 # ==========================================================
@@ -606,7 +661,7 @@ def rip_with_makemkv():
             os.remove(p)
 
     # Dump ALL titles instead of just title 0
-    run([MAKE_MKV_PATH, "mkv", "disc:0", "all", TEMP_DIR])
+    run_makemkv([MAKE_MKV_PATH, "mkv", "disc:0", "all", TEMP_DIR])
 
     mkvs = [
         os.path.join(TEMP_DIR, f)
@@ -618,12 +673,23 @@ def rip_with_makemkv():
         print("❌ No MKV produced")
         sys.exit(1)
 
-    # Pick the largest MKV = main feature
-    mkvs.sort(key=lambda p: os.path.getsize(p), reverse=True)
-    main_mkv = mkvs[0]
+    # Pick the best candidate by duration (to avoid trailers/bonus)
+    candidates = []
+    for p in mkvs:
+        dur = get_duration_seconds(p)
+        print(f"⏱  Title candidate: {os.path.basename(p)} – {int(dur // 60)} min")
+        if dur >= MIN_MAIN_MOVIE_SECONDS:
+            candidates.append((p, dur))
+
+    if not candidates:
+        # Fallback: if nothing >= 45 min, pick longest anyway (still better than random)
+        print("⚠️  No title >= 45 minutes found. Falling back to longest title on disc.")
+        candidates = [(p, get_duration_seconds(p)) for p in mkvs]
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    main_mkv = candidates[0][0]
 
     print(f"🎬 Selected main title: {os.path.basename(main_mkv)}")
-
     return main_mkv
 
 # ==========================================================
@@ -691,6 +757,7 @@ def disc_fingerprint(volume: str, disc_type: str) -> str:
 # ==========================================================
 
 def main():
+    args = parse_args()
     movie = None
     volume, disc_type = detect_disc()
     if not volume:
@@ -702,7 +769,7 @@ def main():
     legacy_checksum = sha256(volume)
     new_checksum = disc_fingerprint(volume, disc_type)
 
-    print(f"🔐 New checksum: {new_checksum}")
+    print(f"🔐 Checksum: {new_checksum}")
 
     legacy_exists = legacy_checksum_exists(legacy_checksum)
     if legacy_exists:
@@ -731,6 +798,57 @@ def main():
             api = discfinder_lookup(new_checksum)
 
     checksum = new_checksum
+
+    # ==========================================
+    # COVERART-ONLY MODE
+    # ==========================================
+    if args.coverart:
+        print("\n🖼️ Cover art only mode enabled")
+
+        if not args.lang:
+            print("❌ --coverart requires --lang <code>")
+            sys.exit(1)
+
+        status = asset_status_all(checksum)
+
+        langs = languages_with_any_assets(status)
+        if not langs:
+            print("❌ No cover art found for this disc")
+            sys.exit(1)
+
+        if args.lang not in status:
+            print(f"❌ No assets found for language: {args.lang}")
+            print("Available languages:")
+            for code in status.keys():
+                print(f"  • {code} ({lang_name(status, code)})")
+            sys.exit(1)
+
+        ensure_mount_or_die()
+
+        title = sanitize_filename(
+            api["title"] if api else normalize_title(volume)
+        )
+        year = api["year"] if api else "Unknown"
+
+        movie_dir = os.path.join(MOVIES_DIR, f"{title} ({year})")
+        os.makedirs(movie_dir, exist_ok=True)
+
+        downloaded = download_assets_for_language(
+            status,
+            checksum,
+            args.lang,
+            movie_dir
+        )
+
+        if downloaded:
+            print("\n✅ Downloaded:")
+            for language, fname in downloaded:
+                print(f"   • {language} – {fname}")
+        else:
+            print("⚠️ No assets downloaded")
+
+        print("\n🏁 Cover art download complete")
+        sys.exit(0)
 
     # ✅ FIX: remember whether this disc was missing in API initially
     needs_post = (api is None)
@@ -813,6 +931,7 @@ def main():
 
     # Snapshot AFTER we did pre-rip downloads
     initial_asset_state = asset_status_all(checksum)
+
 
     # ======================================================
     # RIP + TRANSCODE
