@@ -12,6 +12,7 @@ import urllib.error
 import requests
 import select
 import argparse
+import re
 from dotenv import load_dotenv
 
 # ==========================================================
@@ -342,32 +343,88 @@ def omdb_search(query):
 # INTERACTIVE SEARCH
 # ==========================================================
 
+
+
+def extract_imdb_id(text: str):
+    """
+    Extract tt1234567 from either:
+      - 'tt1234567'
+      - 'https://www.imdb.com/title/tt1234567/'
+      - any text containing tt\d+
+    """
+    if not text:
+        return None
+    m = re.search(r"(tt\d{7,8})", text.strip())
+    return m.group(1) if m else None
+
+
 def interactive_imdb_search():
     while True:
-        query = input("\n🎬 Enter movie title to search IMDb via OMDb (ENTER to abort): ").strip()
+        query = input("\n🎬 Enter movie title OR IMDb ID/URL (ENTER to abort): ").strip()
         if not query:
             return None
 
+        # 1) IMDb ID path (tt.... or URL containing it)
+        imdb_id = extract_imdb_id(query)
+        if imdb_id:
+            movie = omdb_by_imdb(imdb_id)
+            if movie is None:
+                print("⚠️  OMDb is unavailable right now (or lookup failed).")
+                print("💡 Tip: Try again, or use manual mode in the next step.")
+                continue
+
+            print("\n🔍 IMDb match (by ID):")
+            print(f"   Title: {movie['Title']} ({movie['Year']})")
+            print(f"   IMDb:  https://www.imdb.com/title/{movie['imdbID']}/")
+
+            confirm = input("👉 Is this the correct movie? [Y/n]: ").strip().lower()
+            if confirm in ("", "y", "yes"):
+                return movie
+            else:
+                continue
+
+        # 2) Free-text search path
         results = omdb_search(query)
 
-        # OMDb down / network issue
+
         if results is None:
             print("⚠️  OMDb is unavailable right now.")
-            print("💡 Tip: Use manual IMDb ID mode instead (tt1234567).")
-            return None
+            print("💡 Tip: You can paste an IMDb ID like tt2188010 instead.")
+            continue
 
         if not results:
             print("❌ No results found")
             continue
 
-        best = results[0]
-        movie = omdb_by_imdb(best["imdbID"])
+        # Show a small menu instead of auto-picking results[0]
+        print("\n🔎 Search results:")
+        top = results[:10]
+        for i, item in enumerate(top, start=1):
+            imdb_id = item.get("imdbID")
+            imdb_url = f"https://www.imdb.com/title/{imdb_id}/" if imdb_id else ""
+            print(f"   [{i}] {item.get('Title')} ({item.get('Year')}) – {imdb_url}")
 
-        # If OMDb fails on the lookup call, bail out to manual option
+        choice = input("👉 Pick a number (ENTER = 1, 's' = search again): ").strip().lower()
+        if choice == "s":
+            continue
+
+        if not choice:
+            pick = top[0]
+        else:
+            try:
+                idx = int(choice)
+                if idx < 1 or idx > len(top):
+                    print("❌ Invalid choice")
+                    continue
+                pick = top[idx - 1]
+            except ValueError:
+                print("❌ Invalid choice")
+                continue
+
+        movie = omdb_by_imdb(pick["imdbID"])
         if movie is None:
             print("⚠️  OMDb became unavailable while fetching details.")
-            print("💡 Tip: Use manual IMDb ID mode instead (tt1234567).")
-            return None
+            continue
 
         print("\n🔍 IMDb match:")
         print(f"   Title: {movie['Title']} ({movie['Year']})")
@@ -391,9 +448,10 @@ def unresolved_menu():
     choice = input("👉 Choice: ").strip().lower()
 
     if choice == "i":
-        imdb = input("🎬 Enter IMDb ID (e.g. tt0358273): ").strip()
-        if not imdb.startswith("tt") or not imdb[2:].isdigit():
-            print("❌ Invalid IMDb ID format. It must look like tt1234567.")
+        imdb_raw = input("🎬 Enter IMDb ID or URL (e.g. tt0358273 or https://www.imdb.com/title/tt0358273/): ").strip()
+        imdb = extract_imdb_id(imdb_raw)
+        if not imdb:
+            print("❌ Invalid IMDb ID format. It must look like tt1234567 (or a URL containing it).")
             return unresolved_menu()
 
         title = input("✏️ Enter movie title (as on IMDb): ").strip()
