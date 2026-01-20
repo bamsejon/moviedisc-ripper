@@ -13,7 +13,12 @@ import requests
 import select
 import argparse
 import re
+from includes.makemkv_titles import scan_titles_with_makemkv
 from dotenv import load_dotenv
+from includes.metadata_layout import (
+    ensure_metadata_layout,
+    wait_for_metadata_layout_ready,
+)
 
 # ==========================================================
 # ARGS
@@ -168,6 +173,7 @@ def run_makemkv(cmd):
     if proc.returncode != 0:
         print("❌ MakeMKV failed with a non-zero exit code.")
         sys.exit(1)
+
 
 
 def sha256(text: str) -> str:
@@ -350,7 +356,7 @@ def extract_imdb_id(text: str):
     Extract tt1234567 from either:
       - 'tt1234567'
       - 'https://www.imdb.com/title/tt1234567/'
-      - any text containing tt\d+
+      - any text containing tt+
     """
     if not text:
         return None
@@ -484,6 +490,51 @@ def unresolved_menu():
 # ==========================================================
 # DISC FINDER API
 # ==========================================================
+
+def metadata_items_exist(checksum: str) -> bool:
+    """
+    Returns True if metadata layout already has items for this checksum.
+    Used to avoid reposting MakeMKV titles when layout already exists.
+    """
+    try:
+        r = requests.get(
+            f"{DISCFINDER_API}/metadata-layout/{checksum}/items",
+            timeout=10
+        )
+        if r.status_code != 200:
+            return False
+
+        items = r.json()
+        return isinstance(items, list) and len(items) > 0
+
+    except Exception:
+        return False
+
+def get_enabled_metadata_items(checksum: str) -> list[dict]:
+    try:
+        r = requests.get(
+            f"{DISCFINDER_API}/metadata-layout/{checksum}/items",
+            timeout=(5, 30)
+        )
+    except requests.exceptions.RequestException as e:
+        print("❌ Failed to fetch metadata layout items")
+        print(e)
+        sys.exit(1)
+
+    items = r.json()
+    return [i for i in items if i.get("enabled")]
+
+
+def build_output_path(movie_dir: str, item: dict) -> str:
+    filename = item.get("output_filename")
+    if not filename:
+        print("❌ Enabled item missing output_filename")
+        print(item)
+        sys.exit(1)
+
+    out = os.path.join(movie_dir, filename)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    return out
 
 def discfinder_lookup(checksum):
     r = requests.get(
@@ -810,6 +861,7 @@ def disc_fingerprint(volume: str, disc_type: str) -> str:
     return sha256(json.dumps(fingerprint, separators=(",", ":"), sort_keys=True))
 
 
+
 # ==========================================================
 # MAIN
 # ==========================================================
@@ -856,6 +908,10 @@ def main():
             api = discfinder_lookup(new_checksum)
 
     checksum = new_checksum
+
+  
+
+ 
 
     # ==========================================
     # COVERART-ONLY MODE
@@ -966,6 +1022,44 @@ def main():
 
     print(f"\n▶️ Identified: {title} ({year})")
 
+    # ======================================================
+    # INIT METADATA LAYOUT (IDEMPOTENT)
+    # ======================================================
+
+    ensure_metadata_layout(
+        checksum=checksum,
+        disc_type="movie",   # senare: tv / mixed
+        movie=movie
+    )
+
+    # ======================================================
+    # SCAN DISC TITLES (MakeMKV)
+    # ======================================================
+
+    if metadata_items_exist(checksum):
+        print("ℹ️ Metadata items already exist – skipping MakeMKV scan & POST")
+    else:
+        titles = scan_titles_with_makemkv(make_mkv_path=MAKE_MKV_PATH)
+
+        for t in titles:
+            try:
+                r = requests.post(
+                    f"{DISCFINDER_API}/metadata-layout/{checksum}/items",
+                    json=t,
+                    timeout=(5, 60)
+                )
+                if r.status_code not in (200, 201, 409):
+                    print(f"⚠️ Metadata POST returned {r.status_code}")
+            except requests.exceptions.ReadTimeout:
+                print("⚠️ Metadata POST timed out – continuing")
+            except requests.exceptions.RequestException as e:
+                print(f"⚠️ Metadata POST failed: {e}")
+
+
+    # ======================================================
+    # CONTINUE NORMAL FLOW
+    # ======================================================
+
     # Ensure SMB mount before touching MOVIES_DIR
     ensure_mount_or_die()
 
@@ -995,17 +1089,63 @@ def main():
     # RIP + TRANSCODE
     # ======================================================
 
-    raw = rip_with_makemkv()
+    # ======================================================
+    # RIP ALL TITLES (ONCE)
+    # ======================================================
 
-    eject_disc(volume)   # ⏏️ eject disc after rip
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    for f in os.listdir(TEMP_DIR):
+        p = os.path.join(TEMP_DIR, f)
+        if os.path.isfile(p):
+            os.remove(p)
+
+    run_makemkv([MAKE_MKV_PATH, "mkv", "disc:0", "all", TEMP_DIR])
+    eject_disc(volume)
+    print("🛠 Metadata ready to edit:")
+    print(f"   https://discfinder-admin.bylund.cloud/metadata-layout/{checksum}")
+    print("⏳ Waiting for metadata to be marked READY…")
+    wait_for_metadata_layout_ready(checksum)
+    # ======================================================
+    # TRANSCODE ACCORDING TO METADATA LAYOUT
+    # ======================================================
+
+    enabled_items = get_enabled_metadata_items(checksum)
+    if not enabled_items:
+        print("❌ No enabled metadata items – cannot continue")
+        sys.exit(1)
 
     preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
-    transcode(raw, output, preset, disc_type)
 
-    try:
-        os.remove(raw)
-    except FileNotFoundError:
-        pass
+    for item in enabled_items:
+        title_index = item["title_index"]
+
+        # Find MKV file matching this title_index (MakeMKV names files *_tXX.mkv)
+        pattern = f"_t{title_index:02d}.mkv"
+        matches = [
+            f for f in os.listdir(TEMP_DIR)
+            if f.endswith(pattern)
+        ]
+
+        if not matches:
+            print(f"❌ No MKV found for title_index {title_index:02d}")
+            print("   Available files:")
+            for f in os.listdir(TEMP_DIR):
+                print(f"   - {f}")
+            sys.exit(1)
+
+        raw_path = os.path.join(TEMP_DIR, matches[0])
+
+        out_path = build_output_path(movie_dir, item)
+
+        print(f"\n🎬 Transcoding: {os.path.basename(raw_path)}")
+        print(f"   → {out_path}")
+
+        transcode(raw_path, out_path, preset, disc_type)
+
+        try:
+            os.remove(raw_path)
+        except FileNotFoundError:
+            pass
 
     # ======================================================
     # COVER ART PHASE 2 (AFTER ENCODE)
