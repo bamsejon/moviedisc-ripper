@@ -1131,11 +1131,17 @@ def main():
     else:
         titles = scan_titles_with_makemkv(make_mkv_path=MAKE_MKV_PATH)
 
+        # Build auth headers for metadata items (needed for user preferences)
+        metadata_headers = {}
+        if USER_TOKEN:
+            metadata_headers["Authorization"] = f"Bearer {USER_TOKEN}"
+
         for t in titles:
             try:
                 r = requests.post(
                     f"{DISCFINDER_API}/metadata-layout/{checksum}/items",
                     json=t,
+                    headers=metadata_headers,
                     timeout=(5, 60)
                 )
                 if r.status_code not in (200, 201, 409):
