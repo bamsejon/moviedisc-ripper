@@ -614,6 +614,34 @@ def discfinder_post(disc_label, disc_type, checksum, movie):
         print("❌ FAILED to post to DiscFinder API")
         print(e)
 
+def link_disc_to_user(checksum: str):
+    """
+    Links an existing disc to the current user's account.
+    Called after disc identification to ensure the disc appears
+    in the user's collection even if it was already in the database.
+    """
+    if not USER_TOKEN:
+        return  # No token, no linking
+
+    headers = {"Authorization": f"Bearer {USER_TOKEN}"}
+
+    try:
+        r = requests.post(
+            f"{DISCFINDER_API}/users/me/discs/{checksum}",
+            headers=headers,
+            timeout=5
+        )
+
+        if r.status_code == 200:
+            print("📎 Disc linked to your account")
+        elif r.status_code == 404:
+            pass  # Disc doesn't exist yet, will be created by discfinder_post
+        else:
+            print(f"⚠️ Link disc returned HTTP {r.status_code}")
+
+    except Exception as e:
+        print(f"⚠️ Failed to link disc to account: {e}")
+
 def asset_status_all(checksum):
     """
     Returns dict:
@@ -1057,7 +1085,9 @@ def main():
     if needs_post:
         print("📤 Posting disc to DiscFinder API...")
         discfinder_post(volume, disc_type, checksum, movie)
-
+    else:
+        # Disc already existed - still link it to the user's account
+        link_disc_to_user(checksum)
 
     title = sanitize_filename(movie["Title"])
     year = movie["Year"]
@@ -1145,7 +1175,7 @@ def main():
     eject_disc(volume)
     ensure_preview_server()
     print("🛠 Metadata ready to edit:")
-    print(f"   https://discfinder-admin.bylund.cloud/metadata-layout/{checksum}")
+    print(f"   https://keepedia.org/metadata/{checksum}")
     print("⏳ Waiting for metadata to be marked READY…")
     wait_for_metadata_layout_ready(checksum)
     # ======================================================
