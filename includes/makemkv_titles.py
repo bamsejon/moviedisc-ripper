@@ -98,6 +98,30 @@ LANG_CODE_TO_NAME = {
     "und": "Unknown",
 }
 
+# Audio codec ID to human-readable name mapping
+AUDIO_CODEC_NAMES = {
+    "A_AC3": "Dolby Digital",
+    "A_EAC3": "Dolby Digital Plus",
+    "A_TRUEHD": "Dolby TrueHD",
+    "A_DTS": "DTS",
+    "A_DTS-HD": "DTS-HD",
+    "A_DTS-HD.MA": "DTS-HD Master Audio",
+    "A_DTS-HD.HRA": "DTS-HD High Resolution",
+    "A_DTS:X": "DTS:X",
+    "A_AAC": "AAC",
+    "A_FLAC": "FLAC",
+    "A_PCM": "PCM",
+    "A_LPCM": "LPCM",
+    "A_MP3": "MP3",
+    "A_VORBIS": "Vorbis",
+    "A_OPUS": "Opus",
+    "A_MPEG/L2": "MP2",
+    "A_MPEG/L3": "MP3",
+}
+
+# Keywords that indicate Atmos (object-based audio)
+ATMOS_KEYWORDS = ("atmos", "truehd atmos", "dd+ atmos", "dolby atmos")
+
 
 def _parse_duration_to_seconds(s: str) -> Optional[int]:
     """
@@ -191,18 +215,66 @@ def _parse_audio_track(stream_index: int, stream_info: Dict[int, str]) -> Dict[s
     if not lang_name or lang_name == "Unknown":
         lang_name = LANG_CODE_TO_NAME.get(lang_code.lower(), lang_code.upper() if lang_code else "Unknown")
 
-    # Determine codec format
-    codec_format = codec_short or codec_id
-    if not codec_format:
-        codec_format = "Unknown"
+    # Get human-readable codec name
+    codec_readable = AUDIO_CODEC_NAMES.get(codec_id.upper(), "")
+    if not codec_readable:
+        # Try partial match for variants like A_DTS-HD.MA
+        for key, val in AUDIO_CODEC_NAMES.items():
+            if codec_id.upper().startswith(key):
+                codec_readable = val
+                break
+    if not codec_readable:
+        codec_readable = codec_id or "Unknown"
 
-    # Parse channel info
-    channel_info = channels or ""
-    if not channel_info and codec_short:
-        # Try to extract from codec_short like "AC3 5.1"
-        m = re.search(r"(\d+\.\d+|\d+ch)", codec_short, re.IGNORECASE)
-        if m:
-            channel_info = m.group(1)
+    # Parse channel layout from channels field or name
+    # Look for patterns like "5.1", "7.1", "2.0", "Surround 5.1"
+    channel_layout = ""
+    all_info = f"{channels} {name} {codec_short}"
+
+    # Try to find channel layout
+    m = re.search(r"(\d+\.\d+)", all_info)
+    if m:
+        channel_layout = m.group(1)
+    elif "stereo" in all_info.lower():
+        channel_layout = "2.0"
+    elif "mono" in all_info.lower():
+        channel_layout = "1.0"
+    elif "surround" in all_info.lower():
+        channel_layout = "5.1"  # Default surround assumption
+
+    # Format channel info nicely
+    if channel_layout:
+        if channel_layout in ("5.1", "6.1", "7.1"):
+            channel_format = f"{channel_layout} Surround"
+        elif channel_layout == "2.0":
+            channel_format = "Stereo"
+        elif channel_layout == "1.0":
+            channel_format = "Mono"
+        else:
+            channel_format = channel_layout
+    else:
+        channel_format = channels or ""
+
+    # Extract bitrate if available
+    bitrate = ""
+    m = re.search(r"(\d+(?:\.\d+)?\s*[KkMm]b/s)", all_info)
+    if m:
+        bitrate = m.group(1)
+
+    # Detect Atmos
+    is_atmos = any(kw in all_info.lower() for kw in ATMOS_KEYWORDS)
+
+    # Build codec format string: "Dolby TrueHD Atmos 7.1" or "DTS-HD MA 7.1"
+    codec_format = codec_readable
+    if is_atmos and "atmos" not in codec_format.lower():
+        codec_format = f"{codec_readable} Atmos"
+    if channel_layout and channel_layout not in codec_format:
+        codec_format = f"{codec_format} {channel_layout}"
+
+    # Keep bitrate separate but available
+    # channel_format will show the surround info
+    if not channel_format and bitrate:
+        channel_format = bitrate
 
     flags = _detect_track_flags(stream_info)
 
@@ -211,10 +283,11 @@ def _parse_audio_track(stream_index: int, stream_info: Dict[int, str]) -> Dict[s
         "type": "audio",
         "language_code": lang_code,
         "language_name": lang_name,
-        "codec_name": codec_id,
-        "codec_format": codec_format,
-        "channel_format": channel_info,
+        "codec_name": codec_format,  # Human readable format
+        "codec_format": codec_id,    # Raw codec ID for reference
+        "channel_format": channel_format,
         "name": name,
+        "is_atmos": is_atmos,
         "is_commentary": flags["commentary"],
         "is_default": flags["default"],
         "enabled": True,  # Default to enabled
