@@ -231,15 +231,16 @@ def _parse_audio_track(stream_index: int, stream_info: Dict[int, str]) -> Dict[s
     channel_layout = ""
     all_info = f"{channels} {name} {codec_short}"
 
-    # Try to find channel layout
-    m = re.search(r"(\d+\.\d+)", all_info)
+    # Try to find channel layout - be specific to avoid matching bitrates like "1.5 Mb/s"
+    # Valid channel layouts: 1.0, 2.0, 2.1, 5.1, 6.1, 7.1, 7.2, etc.
+    m = re.search(r"\b([12567]\.[012])\b", all_info)
     if m:
         channel_layout = m.group(1)
     elif "stereo" in all_info.lower():
         channel_layout = "2.0"
     elif "mono" in all_info.lower():
         channel_layout = "1.0"
-    elif "surround" in all_info.lower():
+    elif "surround" in all_info.lower() and not channel_layout:
         channel_layout = "5.1"  # Default surround assumption
 
     # Format channel info nicely
