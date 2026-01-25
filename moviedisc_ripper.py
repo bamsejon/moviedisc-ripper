@@ -6,6 +6,7 @@ import json
 import time
 import hashlib
 import subprocess
+import shutil
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -1213,6 +1214,94 @@ def transcode(input_file, output_file, preset, disc_type):
 
     run(cmd)
 
+
+def apply_track_metadata(output_file: str, audio_tracks: list, subtitle_tracks: list):
+    """
+    Use mkvpropedit to set track language and names in the final MKV.
+    This ensures media players show correct language and "Commentary" labels.
+    """
+    # Check if mkvpropedit is available
+    mkvpropedit = shutil.which("mkvpropedit")
+    if not mkvpropedit:
+        print("⚠️ mkvpropedit not found - skipping track metadata")
+        return
+
+    cmd = [mkvpropedit, output_file]
+
+    # ISO 639-2 to ISO 639-2/B mapping for mkvpropedit (it uses 3-letter codes)
+    # Most codes are the same, but some need mapping
+    lang_map = {
+        "und": "und",
+        "eng": "eng", "en": "eng",
+        "swe": "swe", "sv": "swe",
+        "nor": "nor", "no": "nor",
+        "dan": "dan", "da": "dan",
+        "fin": "fin", "fi": "fin",
+        "deu": "ger", "de": "ger",  # German uses "ger" in ISO 639-2/B
+        "fra": "fre", "fr": "fre",  # French uses "fre" in ISO 639-2/B
+        "spa": "spa", "es": "spa",
+        "ita": "ita", "it": "ita",
+        "por": "por", "pt": "por",
+        "nld": "dut", "nl": "dut",  # Dutch uses "dut" in ISO 639-2/B
+        "pol": "pol", "pl": "pol",
+        "rus": "rus", "ru": "rus",
+        "jpn": "jpn", "ja": "jpn",
+        "kor": "kor", "ko": "kor",
+        "zho": "chi", "zh": "chi",  # Chinese uses "chi" in ISO 639-2/B
+    }
+
+    # Apply audio track metadata
+    audio_index = 0
+    for track in (audio_tracks or []):
+        if not track.get("enabled", True):
+            continue
+        audio_index += 1
+
+        lang_code = track.get("language_code", "und")
+        lang_code = lang_map.get(lang_code, lang_code)
+
+        # Build track name
+        track_name_parts = []
+        if track.get("language_name") and track["language_name"] != "Unknown":
+            track_name_parts.append(track["language_name"])
+        if track.get("channel_format"):
+            track_name_parts.append(track["channel_format"])
+        if track.get("is_commentary"):
+            track_name_parts.append("(Commentary)")
+
+        track_name = " ".join(track_name_parts) if track_name_parts else None
+
+        cmd.extend(["--edit", f"track:a{audio_index}"])
+        cmd.extend(["--set", f"language={lang_code}"])
+        if track_name:
+            cmd.extend(["--set", f"name={track_name}"])
+
+    # Apply subtitle track metadata
+    sub_index = 0
+    for track in (subtitle_tracks or []):
+        if not track.get("enabled", True):
+            continue
+        sub_index += 1
+
+        lang_code = track.get("language_code", "und")
+        lang_code = lang_map.get(lang_code, lang_code)
+
+        cmd.extend(["--edit", f"track:s{sub_index}"])
+        cmd.extend(["--set", f"language={lang_code}"])
+        if track.get("language_name"):
+            cmd.extend(["--set", f"name={track['language_name']}"])
+
+    if len(cmd) > 2:  # Only run if we have edits to make
+        print(f"\n📝 Applying track metadata...")
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            print(f"   ✅ Track metadata applied")
+        except subprocess.CalledProcessError as e:
+            print(f"   ⚠️ mkvpropedit failed: {e.stderr.decode() if e.stderr else str(e)}")
+        except Exception as e:
+            print(f"   ⚠️ Failed to apply track metadata: {e}")
+
+
 # ==========================================================
 # CALCULATE CHECKSUM FOR UNIQUE DISC
 # ==========================================================
@@ -1547,6 +1636,13 @@ def main():
         print(f"   → {out_path}")
 
         transcode(raw_path, out_path, preset, disc_type)
+
+        # Apply track metadata (language, commentary labels) to final MKV
+        apply_track_metadata(
+            out_path,
+            item.get("audio_tracks", []),
+            item.get("subtitle_tracks", [])
+        )
 
         try:
             os.remove(raw_path)
