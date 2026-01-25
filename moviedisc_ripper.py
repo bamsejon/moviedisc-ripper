@@ -698,7 +698,7 @@ def choose_language_for_download(status: dict, checksum: str):
         print("\n🖼️  Cover art found!")
         print(f"   {only_name} will be downloaded as cover art (only available language).")
         print("💡 Want to add another language? Upload here while ripping:")
-        print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
+        print(f"   https://keepedia.org/upload/{checksum}")
         return default
 
     default_name = lang_name(status, default)
@@ -825,7 +825,7 @@ def show_missing_assets_prompt_if_none(status: dict, checksum: str):
     if not langs:
         print("\n🖼️  No cover art found for this disc yet.")
         print("💡 Why not scan/photo the cover while ripping and upload it?")
-        print(f"   {DISCFINDER_API}/assets/upload/{checksum}")
+        print(f"   https://keepedia.org/upload/{checksum}")
 
 
 # ==========================================================
