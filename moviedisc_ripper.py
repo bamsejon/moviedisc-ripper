@@ -437,45 +437,116 @@ def run(cmd):
     subprocess.run(cmd, check=True)
     
 
-def run_makemkv(cmd):
+def run_makemkv(cmd, volume_name: str = None, max_retries: int = 3):
     """
-    Runs MakeMKV and aborts immediately if disc read errors are detected.
+    Runs MakeMKV with retry logic for transient read errors.
+
+    Some discs (especially transparent Blu-rays) can have intermittent read
+    errors that succeed on retry. This function will:
+    1. Detect read errors
+    2. Eject the disc to reset the drive
+    3. Wait for user to re-insert
+    4. Retry up to max_retries times
     """
-    print("\n>>>", " ".join(cmd))
+    attempt = 0
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        errors="replace"
-    )
+    while attempt < max_retries:
+        attempt += 1
+        if attempt > 1:
+            print(f"\n🔄 Retry attempt {attempt}/{max_retries}")
 
-    for line in proc.stdout:
-        print(line, end="")
+        print("\n>>>", " ".join(cmd))
 
-        l = line.lower()
-        if (
-            "medium error" in l
-            or "uncorrectable error" in l
-            or "scsi error" in l
-        ):
-            print("\n❌ DISC READ ERROR DETECTED")
-            print("💿 The disc appears to be scratched or unreadable.")
-            print("🛑 Aborting rip before transcoding.")
-            print("💡 Tip: Clean the disc or try another drive.")
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace"
+        )
+
+        error_detected = False
+        error_offset = None
+
+        for line in proc.stdout:
+            print(line, end="")
+
+            l = line.lower()
+            if (
+                "medium error" in l
+                or "uncorrectable error" in l
+                or "scsi error" in l
+            ):
+                error_detected = True
+                # Try to extract offset for logging
+                if "offset" in l:
+                    try:
+                        parts = l.split("offset")
+                        if len(parts) > 1:
+                            error_offset = parts[1].strip().strip("'\"")
+                    except:
+                        pass
+
+                # Terminate MakeMKV process
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                break
+
+        if not error_detected:
+            proc.wait()
+            if proc.returncode != 0:
+                print("❌ MakeMKV failed with a non-zero exit code.")
+                sys.exit(1)
+            return  # Success!
+
+        # Error detected - decide whether to retry
+        if attempt < max_retries:
+            print(f"\n⚠️  Read error detected at offset {error_offset or 'unknown'}")
+            print(f"💿 This may be a transient error. Attempting recovery...")
+
+            # Eject disc to reset the drive
+            if volume_name:
+                print(f"⏏️  Ejecting disc to reset drive...")
+                try:
+                    subprocess.run(
+                        ["diskutil", "eject", f"/Volumes/{volume_name}"],
+                        check=False,
+                        capture_output=True
+                    )
+                except:
+                    pass
+
+                print("📀 Please re-insert the disc (or wait if auto-loading)...")
+                print("⏳ Waiting for disc to be detected...")
+
+                # Wait for disc to reappear (up to 60 seconds)
+                for _ in range(60):
+                    time.sleep(1)
+                    if os.path.exists(f"/Volumes/{volume_name}"):
+                        print(f"✅ Disc detected: {volume_name}")
+                        time.sleep(2)  # Give it a moment to fully mount
+                        break
+                else:
+                    print("❌ Disc not detected after 60 seconds")
+                    print("💡 Please insert the disc and run the script again")
+                    sys.exit(1)
+            else:
+                # No volume name - just wait a bit
+                print("⏳ Waiting 5 seconds before retry...")
+                time.sleep(5)
+        else:
+            # All retries exhausted
+            print("\n❌ DISC READ ERROR - ALL RETRIES FAILED")
+            print(f"💿 Failed after {max_retries} attempts.")
+            print("🛑 The disc may be damaged or incompatible with this drive.")
+            print("💡 Tips:")
+            print("   - Clean the disc with a soft cloth (center to edge)")
+            print("   - Try a different Blu-ray drive")
+            print("   - Check if the disc plays in a standalone player")
             sys.exit(1)
-
-    proc.wait()
-
-    if proc.returncode != 0:
-        print("❌ MakeMKV failed with a non-zero exit code.")
-        sys.exit(1)
 
 
 
@@ -1916,7 +1987,7 @@ def main():
         if os.path.isfile(p):
             os.remove(p)
 
-    run_makemkv([MAKE_MKV_PATH, "mkv", "disc:0", "all", disc_temp_dir])
+    run_makemkv([MAKE_MKV_PATH, "mkv", "disc:0", "all", disc_temp_dir], volume_name=volume)
     eject_disc(volume)
 
     # ======================================================
