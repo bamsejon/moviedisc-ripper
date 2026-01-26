@@ -1480,21 +1480,55 @@ def show_missing_assets_prompt_if_none(status: dict, disc_id: int):
 # HANDBRAKE
 # ==========================================================
 
-def transcode(input_file, output_file, preset, disc_type):
+def transcode(input_file, output_file, preset, disc_type, audio_tracks=None, subtitle_tracks=None):
+    """
+    Transcode with HandBrake, respecting track selections.
+
+    audio_tracks/subtitle_tracks: lists of track dicts with 'enabled' flag.
+    Only enabled tracks will be included in the output.
+    """
     cmd = [
         HANDBRAKE_CLI_PATH,
         "-i", input_file,
         "-o", output_file,
         "--preset", preset,
-
-        "--all-audio",
-        "--audio-lang-list", "eng",
-
-        "--all-subtitles",
-        "--subtitle-burned=0",
-
         "--format", "mkv"
     ]
+
+    # Build audio track selection
+    # HandBrake uses 1-based track numbers within each type
+    if audio_tracks:
+        enabled_audio = []
+        for i, track in enumerate(audio_tracks, start=1):
+            if track.get("enabled", True):
+                enabled_audio.append(str(i))
+
+        if enabled_audio:
+            cmd.extend(["--audio", ",".join(enabled_audio)])
+            print(f"   🎧 Including audio tracks: {', '.join(enabled_audio)}")
+        else:
+            # No audio selected - include first track as fallback
+            cmd.extend(["--audio", "1"])
+            print(f"   🎧 No audio selected, using track 1")
+    else:
+        # No track data - include all audio
+        cmd.append("--all-audio")
+
+    # Build subtitle track selection
+    if subtitle_tracks:
+        enabled_subs = []
+        for i, track in enumerate(subtitle_tracks, start=1):
+            if track.get("enabled", True):
+                enabled_subs.append(str(i))
+
+        if enabled_subs:
+            cmd.extend(["--subtitle", ",".join(enabled_subs)])
+            print(f"   💬 Including subtitle tracks: {', '.join(enabled_subs)}")
+        else:
+            print(f"   💬 No subtitles selected")
+    else:
+        # No track data - include all subtitles
+        cmd.append("--all-subtitles")
 
     # Blu-ray: allow passthrough where it exists
     if disc_type == "BLURAY":
@@ -1507,6 +1541,9 @@ def apply_track_metadata(output_file: str, audio_tracks: list, subtitle_tracks: 
     """
     Use mkvpropedit to set track language and names in the final MKV.
     This ensures media players show correct language and "Commentary" labels.
+
+    Note: audio_tracks and subtitle_tracks should only contain enabled tracks
+    (the ones actually included in the output file).
     """
     # Check if mkvpropedit is available
     mkvpropedit = shutil.which("mkvpropedit")
@@ -1538,13 +1575,8 @@ def apply_track_metadata(output_file: str, audio_tracks: list, subtitle_tracks: 
         "zho": "chi", "zh": "chi",  # Chinese uses "chi" in ISO 639-2/B
     }
 
-    # Apply audio track metadata
-    audio_index = 0
-    for track in (audio_tracks or []):
-        if not track.get("enabled", True):
-            continue
-        audio_index += 1
-
+    # Apply audio track metadata (1-based index matches output track order)
+    for i, track in enumerate(audio_tracks or [], start=1):
         lang_code = track.get("language_code", "und")
         lang_code = lang_map.get(lang_code, lang_code)
 
@@ -1559,22 +1591,17 @@ def apply_track_metadata(output_file: str, audio_tracks: list, subtitle_tracks: 
 
         track_name = " ".join(track_name_parts) if track_name_parts else None
 
-        cmd.extend(["--edit", f"track:a{audio_index}"])
+        cmd.extend(["--edit", f"track:a{i}"])
         cmd.extend(["--set", f"language={lang_code}"])
         if track_name:
             cmd.extend(["--set", f"name={track_name}"])
 
-    # Apply subtitle track metadata
-    sub_index = 0
-    for track in (subtitle_tracks or []):
-        if not track.get("enabled", True):
-            continue
-        sub_index += 1
-
+    # Apply subtitle track metadata (1-based index matches output track order)
+    for i, track in enumerate(subtitle_tracks or [], start=1):
         lang_code = track.get("language_code", "und")
         lang_code = lang_map.get(lang_code, lang_code)
 
-        cmd.extend(["--edit", f"track:s{sub_index}"])
+        cmd.extend(["--edit", f"track:s{i}"])
         cmd.extend(["--set", f"language={lang_code}"])
         if track.get("language_name"):
             cmd.extend(["--set", f"name={track['language_name']}"])
@@ -1937,14 +1964,16 @@ def main():
         print(f"\n🎬 Transcoding: {os.path.basename(raw_path)}")
         print(f"   → {out_path}")
 
-        transcode(raw_path, out_path, preset, disc_type)
+        audio_tracks = item.get("audio_tracks", [])
+        subtitle_tracks = item.get("subtitle_tracks", [])
+
+        transcode(raw_path, out_path, preset, disc_type, audio_tracks, subtitle_tracks)
 
         # Apply track metadata (language, commentary labels) to final MKV
-        apply_track_metadata(
-            out_path,
-            item.get("audio_tracks", []),
-            item.get("subtitle_tracks", [])
-        )
+        # Only pass enabled tracks since those are the ones in the output
+        enabled_audio = [t for t in audio_tracks if t.get("enabled", True)]
+        enabled_subs = [t for t in subtitle_tracks if t.get("enabled", True)]
+        apply_track_metadata(out_path, enabled_audio, enabled_subs)
 
         try:
             os.remove(raw_path)
