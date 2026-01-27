@@ -2015,10 +2015,10 @@ def main():
                     temp_path = os.path.join(disc_temp_dir, source_file)
                     if os.path.isfile(temp_path):
                         actual_size = os.path.getsize(temp_path)
-                        # Allow 5% size tolerance (MakeMKV estimates can vary)
+                        # Allow 20% size tolerance (MakeMKV estimates can vary significantly)
                         size_diff = abs(actual_size - expected_size) / max(expected_size, 1)
-                        if size_diff < 0.05 or expected_size == 0:
-                            matched_files.append(f"   ✓ {source_file} (size OK)")
+                        if size_diff < 0.20 or expected_size == 0:
+                            matched_files.append(f"   ✓ {source_file} ({actual_size/1e9:.2f}GB)")
                         else:
                             matched_files.append(f"   ⚠️ {source_file} (size mismatch: {actual_size/1e9:.2f}GB vs expected {expected_size/1e9:.2f}GB)")
                             all_valid = False
