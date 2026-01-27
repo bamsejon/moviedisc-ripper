@@ -62,7 +62,7 @@ OMDB_API_KEY = os.getenv("OMDB_API_KEY")
 # Optional: User token for linking rips to your Keepedia account
 USER_TOKEN = os.getenv("USER_TOKEN")
 
-DISCFINDER_API = "https://discfinder-api.bylund.cloud"
+DISCFINDER_API = os.getenv("DISCFINDER_API", "https://disc-api.bylund.cloud")
 
 # ==========================================================
 # CONFIG
