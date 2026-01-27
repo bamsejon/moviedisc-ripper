@@ -1977,39 +1977,24 @@ def main():
     # ======================================================
 
     # ======================================================
-    # CHECK IF ALREADY RIPPED
+    # CHECK IF TEMP FILES ALREADY EXIST (SKIP MAKEMKV)
     # ======================================================
 
-    skip_rip_and_transcode = False
-    existing_enabled_items = get_enabled_metadata_items(checksum)
+    os.makedirs(disc_temp_dir, exist_ok=True)
+    existing_temp_files = [f for f in os.listdir(disc_temp_dir) if f.endswith('.mkv') and not f.startswith('._')]
 
-    if existing_enabled_items and os.path.isdir(movie_dir):
-        # Check if all expected output files already exist
-        all_exist = True
-        existing_files = []
-        for item in existing_enabled_items:
-            expected_path = build_output_path(movie_dir, item)
-            if os.path.isfile(expected_path):
-                existing_files.append(os.path.basename(expected_path))
-            else:
-                all_exist = False
-                break
-
-        if all_exist and existing_files:
-            print(f"\n📀 Disc seems to already be ripped!")
-            print(f"   Found {len(existing_files)} existing file(s) in: {movie_dir}")
-            for f in existing_files:
-                print(f"   ✓ {f}")
-            print("\n⏭️  Skipping ripping and transcoding, continuing to cover art...")
-            skip_rip_and_transcode = True
-            eject_disc(volume)
-
-    if not skip_rip_and_transcode:
+    if existing_temp_files:
+        print(f"\n📀 Disc seems to already be ripped!")
+        print(f"   Found {len(existing_temp_files)} temp file(s) in: {disc_temp_dir}")
+        for f in existing_temp_files:
+            print(f"   ✓ {f}")
+        print("\n⏭️  Skipping MakeMKV rip, continuing to transcoding...")
+        eject_disc(volume)
+    else:
         # ======================================================
         # RIP ALL TITLES (ONCE)
         # ======================================================
 
-        os.makedirs(disc_temp_dir, exist_ok=True)
         # Clean only this disc's temp directory (not others that may be encoding)
         for f in os.listdir(disc_temp_dir):
             p = os.path.join(disc_temp_dir, f)
@@ -2019,85 +2004,85 @@ def main():
         run_makemkv([MAKE_MKV_PATH, "mkv", "disc:0", "all", disc_temp_dir], volume_name=volume)
         eject_disc(volume)
 
-        # ======================================================
-        # AUDIO ANALYSIS (Commentary Detection)
-        # ======================================================
-        analyze_and_update_metadata(checksum, disc_temp_dir)
+    # ======================================================
+    # AUDIO ANALYSIS (Commentary Detection)
+    # ======================================================
+    analyze_and_update_metadata(checksum, disc_temp_dir)
 
-        ensure_preview_server(disc_temp_dir)
-        print("🛠 Metadata ready to edit:")
-        print(f"   https://keepedia.org/metadata/{disc_id}")
-        print("⏳ Waiting for metadata to be marked READY…")
-        wait_for_metadata_layout_ready(checksum)
+    ensure_preview_server(disc_temp_dir)
+    print("🛠 Metadata ready to edit:")
+    print(f"   https://keepedia.org/metadata/{disc_id}")
+    print("⏳ Waiting for metadata to be marked READY…")
+    wait_for_metadata_layout_ready(checksum)
 
-        # ======================================================
-        # TRANSCODE ACCORDING TO METADATA LAYOUT
-        # ======================================================
+    # ======================================================
+    # TRANSCODE ACCORDING TO METADATA LAYOUT
+    # ======================================================
 
-        enabled_items = get_enabled_metadata_items(checksum)
-        if not enabled_items:
-            print("❌ No enabled metadata items – cannot continue")
+    enabled_items = get_enabled_metadata_items(checksum)
+    if not enabled_items:
+        print("❌ No enabled metadata items – cannot continue")
+        sys.exit(1)
+
+    preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
+
+    for item in enabled_items:
+        title_index = item["title_index"]
+
+        # Find MKV file matching this title_index (MakeMKV names files *_tXX.mkv)
+        pattern = f"_t{title_index:02d}.mkv"
+        matches = [
+            f for f in os.listdir(disc_temp_dir)
+            if f.endswith(pattern)
+        ]
+
+        if not matches:
+            print(f"❌ No MKV found for title_index {title_index:02d}")
+            print("   Available files:")
+            for f in os.listdir(disc_temp_dir):
+                print(f"   - {f}")
             sys.exit(1)
 
-        preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
+        raw_path = os.path.join(disc_temp_dir, matches[0])
 
-        for item in enabled_items:
-            title_index = item["title_index"]
+        out_path = build_output_path(movie_dir, item)
 
-            # Find MKV file matching this title_index (MakeMKV names files *_tXX.mkv)
-            pattern = f"_t{title_index:02d}.mkv"
-            matches = [
-                f for f in os.listdir(disc_temp_dir)
-                if f.endswith(pattern)
-            ]
+        # Ask before overwriting if output file already exists
+        if os.path.isfile(out_path):
+            print(f"\n⚠️  Output file already exists: {os.path.basename(out_path)}")
+            answer = input("   Overwrite? [y/N]: ").strip().lower()
+            if answer != 'y':
+                print("   ⏭️  Skipping...")
+                continue
+            print("   🗑️  Will overwrite existing file")
 
-            if not matches:
-                print(f"❌ No MKV found for title_index {title_index:02d}")
-                print("   Available files:")
-                for f in os.listdir(disc_temp_dir):
-                    print(f"   - {f}")
-                sys.exit(1)
+        print(f"\n🎬 Transcoding: {os.path.basename(raw_path)}")
+        print(f"   → {out_path}")
 
-            raw_path = os.path.join(disc_temp_dir, matches[0])
+        audio_tracks = item.get("audio_tracks", [])
+        subtitle_tracks = item.get("subtitle_tracks", [])
 
-            out_path = build_output_path(movie_dir, item)
+        transcode(raw_path, out_path, preset, disc_type, audio_tracks, subtitle_tracks)
 
-            # Ask before overwriting if output file already exists
-            if os.path.isfile(out_path):
-                print(f"\n⚠️  Output file already exists: {os.path.basename(out_path)}")
-                answer = input("   Overwrite? [y/N]: ").strip().lower()
-                if answer != 'y':
-                    print("   ⏭️  Skipping...")
-                    continue
-                print("   🗑️  Will overwrite existing file")
+        # Apply track metadata (language, commentary labels) to final MKV
+        # Only pass enabled tracks since those are the ones in the output
+        enabled_audio = [t for t in audio_tracks if t.get("enabled", True)]
+        enabled_subs = [t for t in subtitle_tracks if t.get("enabled", True)]
+        apply_track_metadata(out_path, enabled_audio, enabled_subs)
 
-            print(f"\n🎬 Transcoding: {os.path.basename(raw_path)}")
-            print(f"   → {out_path}")
-
-            audio_tracks = item.get("audio_tracks", [])
-            subtitle_tracks = item.get("subtitle_tracks", [])
-
-            transcode(raw_path, out_path, preset, disc_type, audio_tracks, subtitle_tracks)
-
-            # Apply track metadata (language, commentary labels) to final MKV
-            # Only pass enabled tracks since those are the ones in the output
-            enabled_audio = [t for t in audio_tracks if t.get("enabled", True)]
-            enabled_subs = [t for t in subtitle_tracks if t.get("enabled", True)]
-            apply_track_metadata(out_path, enabled_audio, enabled_subs)
-
-            try:
-                os.remove(raw_path)
-            except FileNotFoundError:
-                pass
-
-        # Clean up empty disc-specific temp directory
         try:
-            remaining = os.listdir(disc_temp_dir)
-            if not remaining:
-                os.rmdir(disc_temp_dir)
-                print(f"🧹 Cleaned up temp directory: {disc_temp_dir}")
-        except Exception:
-            pass  # Not critical if cleanup fails
+            os.remove(raw_path)
+        except FileNotFoundError:
+            pass
+
+    # Clean up empty disc-specific temp directory
+    try:
+        remaining = os.listdir(disc_temp_dir)
+        if not remaining:
+            os.rmdir(disc_temp_dir)
+            print(f"🧹 Cleaned up temp directory: {disc_temp_dir}")
+    except Exception:
+        pass  # Not critical if cleanup fails
 
     # ======================================================
     # COVER ART PHASE 2 (AFTER ENCODE)
