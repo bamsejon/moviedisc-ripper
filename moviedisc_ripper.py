@@ -2062,10 +2062,14 @@ def main():
 
             out_path = build_output_path(movie_dir, item)
 
-            # Skip if output file already exists
+            # Ask before overwriting if output file already exists
             if os.path.isfile(out_path):
-                print(f"\n⏭️  Skipping (already exists): {os.path.basename(out_path)}")
-                continue
+                print(f"\n⚠️  Output file already exists: {os.path.basename(out_path)}")
+                answer = input("   Overwrite? [y/N]: ").strip().lower()
+                if answer != 'y':
+                    print("   ⏭️  Skipping...")
+                    continue
+                print("   🗑️  Will overwrite existing file")
 
             print(f"\n🎬 Transcoding: {os.path.basename(raw_path)}")
             print(f"   → {out_path}")
