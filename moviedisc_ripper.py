@@ -1977,88 +1977,123 @@ def main():
     # ======================================================
 
     # ======================================================
-    # RIP ALL TITLES (ONCE)
+    # CHECK IF ALREADY RIPPED
     # ======================================================
 
-    os.makedirs(disc_temp_dir, exist_ok=True)
-    # Clean only this disc's temp directory (not others that may be encoding)
-    for f in os.listdir(disc_temp_dir):
-        p = os.path.join(disc_temp_dir, f)
-        if os.path.isfile(p):
-            os.remove(p)
+    skip_rip_and_transcode = False
+    existing_enabled_items = get_enabled_metadata_items(checksum)
 
-    run_makemkv([MAKE_MKV_PATH, "mkv", "disc:0", "all", disc_temp_dir], volume_name=volume)
-    eject_disc(volume)
+    if existing_enabled_items and os.path.isdir(movie_dir):
+        # Check if all expected output files already exist
+        all_exist = True
+        existing_files = []
+        for item in existing_enabled_items:
+            expected_path = build_output_path(movie_dir, item)
+            if os.path.isfile(expected_path):
+                existing_files.append(os.path.basename(expected_path))
+            else:
+                all_exist = False
+                break
 
-    # ======================================================
-    # AUDIO ANALYSIS (Commentary Detection)
-    # ======================================================
-    analyze_and_update_metadata(checksum, disc_temp_dir)
+        if all_exist and existing_files:
+            print(f"\n📀 Disc seems to already be ripped!")
+            print(f"   Found {len(existing_files)} existing file(s) in: {movie_dir}")
+            for f in existing_files:
+                print(f"   ✓ {f}")
+            print("\n⏭️  Skipping ripping and transcoding, continuing to cover art...")
+            skip_rip_and_transcode = True
+            eject_disc(volume)
 
-    ensure_preview_server(disc_temp_dir)
-    print("🛠 Metadata ready to edit:")
-    print(f"   https://keepedia.org/metadata/{disc_id}")
-    print("⏳ Waiting for metadata to be marked READY…")
-    wait_for_metadata_layout_ready(checksum)
-    # ======================================================
-    # TRANSCODE ACCORDING TO METADATA LAYOUT
-    # ======================================================
+    if not skip_rip_and_transcode:
+        # ======================================================
+        # RIP ALL TITLES (ONCE)
+        # ======================================================
 
-    enabled_items = get_enabled_metadata_items(checksum)
-    if not enabled_items:
-        print("❌ No enabled metadata items – cannot continue")
-        sys.exit(1)
+        os.makedirs(disc_temp_dir, exist_ok=True)
+        # Clean only this disc's temp directory (not others that may be encoding)
+        for f in os.listdir(disc_temp_dir):
+            p = os.path.join(disc_temp_dir, f)
+            if os.path.isfile(p):
+                os.remove(p)
 
-    preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
+        run_makemkv([MAKE_MKV_PATH, "mkv", "disc:0", "all", disc_temp_dir], volume_name=volume)
+        eject_disc(volume)
 
-    for item in enabled_items:
-        title_index = item["title_index"]
+        # ======================================================
+        # AUDIO ANALYSIS (Commentary Detection)
+        # ======================================================
+        analyze_and_update_metadata(checksum, disc_temp_dir)
 
-        # Find MKV file matching this title_index (MakeMKV names files *_tXX.mkv)
-        pattern = f"_t{title_index:02d}.mkv"
-        matches = [
-            f for f in os.listdir(disc_temp_dir)
-            if f.endswith(pattern)
-        ]
+        ensure_preview_server(disc_temp_dir)
+        print("🛠 Metadata ready to edit:")
+        print(f"   https://keepedia.org/metadata/{disc_id}")
+        print("⏳ Waiting for metadata to be marked READY…")
+        wait_for_metadata_layout_ready(checksum)
 
-        if not matches:
-            print(f"❌ No MKV found for title_index {title_index:02d}")
-            print("   Available files:")
-            for f in os.listdir(disc_temp_dir):
-                print(f"   - {f}")
+        # ======================================================
+        # TRANSCODE ACCORDING TO METADATA LAYOUT
+        # ======================================================
+
+        enabled_items = get_enabled_metadata_items(checksum)
+        if not enabled_items:
+            print("❌ No enabled metadata items – cannot continue")
             sys.exit(1)
 
-        raw_path = os.path.join(disc_temp_dir, matches[0])
+        preset = HANDBRAKE_PRESET_BD if disc_type == "BLURAY" else HANDBRAKE_PRESET_DVD
 
-        out_path = build_output_path(movie_dir, item)
+        for item in enabled_items:
+            title_index = item["title_index"]
 
-        print(f"\n🎬 Transcoding: {os.path.basename(raw_path)}")
-        print(f"   → {out_path}")
+            # Find MKV file matching this title_index (MakeMKV names files *_tXX.mkv)
+            pattern = f"_t{title_index:02d}.mkv"
+            matches = [
+                f for f in os.listdir(disc_temp_dir)
+                if f.endswith(pattern)
+            ]
 
-        audio_tracks = item.get("audio_tracks", [])
-        subtitle_tracks = item.get("subtitle_tracks", [])
+            if not matches:
+                print(f"❌ No MKV found for title_index {title_index:02d}")
+                print("   Available files:")
+                for f in os.listdir(disc_temp_dir):
+                    print(f"   - {f}")
+                sys.exit(1)
 
-        transcode(raw_path, out_path, preset, disc_type, audio_tracks, subtitle_tracks)
+            raw_path = os.path.join(disc_temp_dir, matches[0])
 
-        # Apply track metadata (language, commentary labels) to final MKV
-        # Only pass enabled tracks since those are the ones in the output
-        enabled_audio = [t for t in audio_tracks if t.get("enabled", True)]
-        enabled_subs = [t for t in subtitle_tracks if t.get("enabled", True)]
-        apply_track_metadata(out_path, enabled_audio, enabled_subs)
+            out_path = build_output_path(movie_dir, item)
 
+            # Skip if output file already exists
+            if os.path.isfile(out_path):
+                print(f"\n⏭️  Skipping (already exists): {os.path.basename(out_path)}")
+                continue
+
+            print(f"\n🎬 Transcoding: {os.path.basename(raw_path)}")
+            print(f"   → {out_path}")
+
+            audio_tracks = item.get("audio_tracks", [])
+            subtitle_tracks = item.get("subtitle_tracks", [])
+
+            transcode(raw_path, out_path, preset, disc_type, audio_tracks, subtitle_tracks)
+
+            # Apply track metadata (language, commentary labels) to final MKV
+            # Only pass enabled tracks since those are the ones in the output
+            enabled_audio = [t for t in audio_tracks if t.get("enabled", True)]
+            enabled_subs = [t for t in subtitle_tracks if t.get("enabled", True)]
+            apply_track_metadata(out_path, enabled_audio, enabled_subs)
+
+            try:
+                os.remove(raw_path)
+            except FileNotFoundError:
+                pass
+
+        # Clean up empty disc-specific temp directory
         try:
-            os.remove(raw_path)
-        except FileNotFoundError:
-            pass
-
-    # Clean up empty disc-specific temp directory
-    try:
-        remaining = os.listdir(disc_temp_dir)
-        if not remaining:
-            os.rmdir(disc_temp_dir)
-            print(f"🧹 Cleaned up temp directory: {disc_temp_dir}")
-    except Exception:
-        pass  # Not critical if cleanup fails
+            remaining = os.listdir(disc_temp_dir)
+            if not remaining:
+                os.rmdir(disc_temp_dir)
+                print(f"🧹 Cleaned up temp directory: {disc_temp_dir}")
+        except Exception:
+            pass  # Not critical if cleanup fails
 
     # ======================================================
     # COVER ART PHASE 2 (AFTER ENCODE)
