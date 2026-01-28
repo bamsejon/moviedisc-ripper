@@ -315,10 +315,28 @@ def analyze_and_update_metadata(checksum: str, temp_dir: str):
     """
     Analyze all ripped MKV files and update the API with commentary detection results.
     Also applies user preferences for audio track selection.
+
+    NOTE: Skips analysis if metadata layout is already marked READY to preserve
+    user corrections (e.g., manually unmarking false-positive commentaries).
     """
     print("\n" + "=" * 50)
     print("🔬 AUDIO ANALYSIS PHASE")
     print("=" * 50)
+
+    # Check if metadata layout is already marked READY - skip analysis to preserve user changes
+    try:
+        r = requests.get(f"{DISCFINDER_API}/metadata-layout/{checksum}", timeout=10)
+        if r.status_code == 200:
+            layout = r.json()
+            status = layout.get("status", "").lower()
+            print(f"   Metadata layout status: {layout.get('status')}")
+            if status == "ready":
+                print("⏭️  Metadata already marked READY - skipping audio analysis")
+                print("   (Commentary flags preserved from previous run)")
+                return
+    except Exception as e:
+        print(f"⚠️  Could not check metadata status: {e}")
+        # Continue with analysis if we can't check status
 
     # Get user settings for audio preferences
     settings = get_user_settings()
