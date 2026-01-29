@@ -1714,7 +1714,7 @@ def apply_track_metadata(output_file: str, audio_tracks: list, subtitle_tracks: 
 
         cmd.extend(["--edit", f"track:s{i}"])
         cmd.extend(["--set", f"language={lang_code}"])
-        if track.get("language_name"):
+        if track.get("language_name") and track["language_name"] != "Unknown":
             cmd.extend(["--set", f"name={track['language_name']}"])
 
     if len(cmd) > 2:  # Only run if we have edits to make
