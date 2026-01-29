@@ -35,6 +35,13 @@
 - Plex-naming: `Show - S01E01 - Title.mkv`
 - TMDB integration för episoddata
 
+### v1.5 - Multi-language Support
+- Flerspråksstöd för keepedia.org
+- Svenska, Engelska, + fler språk
+- Språkval i settings
+- Översättning av metadata admin UI
+- Lokaliserade felmeddelanden i ripper script
+
 ---
 
 ## Framtida Features (backlog)
