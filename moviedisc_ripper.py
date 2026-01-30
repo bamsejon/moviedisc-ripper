@@ -59,7 +59,8 @@ load_dotenv()
 # Optional: User token for linking rips to your Keepedia account
 USER_TOKEN = os.getenv("USER_TOKEN")
 
-DISCFINDER_API = os.getenv("DISCFINDER_API", "https://test-api.keepedia.org")
+DISCFINDER_API = os.getenv("DISCFINDER_API", "https://disc-api.bylund.cloud")
+KEEPEDIA_WEB = os.getenv("KEEPEDIA_WEB", "https://keepedia.org")
 
 # ==========================================================
 # CONFIG
@@ -1446,7 +1447,7 @@ def choose_language_for_download(status: dict, disc_id: int):
         print("\n🖼️  Cover art found!")
         print(f"   {only_name} will be downloaded as cover art (only available language).")
         print("💡 Want to add another language? Upload here while ripping:")
-        print(f"   https://keepedia.org/upload/{disc_id}")
+        print(f"   {KEEPEDIA_WEB}/upload/{disc_id}")
         return default
 
     default_name = lang_name(status, default)
@@ -1573,7 +1574,7 @@ def show_missing_assets_prompt_if_none(status: dict, disc_id: int):
     if not langs:
         print("\n🖼️  No cover art found for this disc yet.")
         print("💡 Why not scan/photo the cover while ripping and upload it?")
-        print(f"   https://keepedia.org/upload/{disc_id}")
+        print(f"   {KEEPEDIA_WEB}/upload/{disc_id}")
 
 
 # ==========================================================
@@ -2207,7 +2208,7 @@ def main():
 
     ensure_preview_server(disc_temp_dir)
     print("🛠 Metadata ready to edit:")
-    print(f"   https://keepedia.org/metadata/{disc_id}")
+    print(f"   {KEEPEDIA_WEB}/metadata/{disc_id}")
     print("⏳ Waiting for metadata to be marked READY…")
     wait_for_metadata_layout_ready(checksum)
 
