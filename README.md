@@ -23,7 +23,6 @@ Insert a DVD or Blu-ray → run the script → wait → disc ejects → movie ap
 2. **Configure your settings** at [https://keepedia.org/settings](https://keepedia.org/settings)
    - Set your output path (where movies go)
    - Set your temp path (needs ~50GB free)
-   - Add your OMDB API key
    - Configure HandBrake presets and paths
 3. **Download the installer** from [https://keepedia.org/download](https://keepedia.org/download)
 4. **Run the installer:**
@@ -53,9 +52,6 @@ If you prefer not to use Keepedia, follow the traditional setup below.
 - **MakeMKV** - Download from [makemkv.com](https://www.makemkv.com/download/)
 - **HandBrakeCLI** - Command-line version of HandBrake
 - **MKVToolNix** - For setting track metadata (language, commentary labels)
-- **OMDB API Key** - Get one at [omdbapi.com](https://www.omdbapi.com/apikey.aspx)
-
-> **Note:** Only the Patreon tier OMDB API key (1000 req/day) is tested and confirmed working.
 
 ### Platform-Specific Installation
 
@@ -109,7 +105,7 @@ pip3 install python-dotenv requests
 
 # Create .env file
 cp .env.example .env
-nano .env  # Add your OMDB_API_KEY
+nano .env  # Configure your paths
 ```
 
 ### Configuration
@@ -133,7 +129,7 @@ python3 moviedisc_ripper.py
 ## 🔄 How It Works
 
 1. **Disc Detection** - Automatically detects DVD or Blu-ray
-2. **Identification** - Checks DiscFinder API, then OMDB
+2. **Identification** - Checks DiscFinder API, then TMDB for movie details
 3. **Ripping** - MakeMKV extracts all titles
 4. **Audio Analysis** - Detects commentary tracks by analyzing dynamic range
 5. **Smart Track Selection** - Auto-selects best audio (5.1 > stereo), respects your preferences
@@ -163,8 +159,9 @@ Movies/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OMDB_API_KEY` | Your OMDB API key | Required |
 | `USER_TOKEN` | Keepedia API token | Optional |
+| `DISCFINDER_API` | API URL (usually not needed) | `https://disc-api.bylund.cloud` |
+| `KEEPEDIA_WEB` | Web URL (usually not needed) | `https://keepedia.org` |
 | `OUTPUT_PATH` | Final movie location | `/Volumes/Media/Movies` |
 | `TEMP_PATH` | Temp rip location | `/tmp/rip` |
 | `MAKEMKV_PATH` | Path to makemkvcon | `/Applications/MakeMKV.app/Contents/MacOS/makemkvcon` |
@@ -175,9 +172,6 @@ Movies/
 ---
 
 ## 🆘 Troubleshooting
-
-### "OMDB_API_KEY not set"
-Create a `.env` file with your API key, or configure it at keepedia.org/settings
 
 ### "No disc detected"
 Make sure your disc is mounted in Finder. Check `/Volumes/` for the disc.
@@ -197,7 +191,7 @@ This project is a fork of [SMUELDigital/DVD-Rip-Automation-Script](https://githu
 
 Extended with:
 - Keepedia integration for collection tracking
-- OMDb-powered title detection
+- TMDB-powered title detection (no API key needed)
 - DiscFinder API for community disc database
 - Intelligent disc fingerprinting
 - Cover art download
