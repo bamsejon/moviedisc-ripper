@@ -56,9 +56,6 @@ def parse_args():
 
 load_dotenv()
 
-# OMDB key can come from .env or from user settings (fetched later)
-OMDB_API_KEY = os.getenv("OMDB_API_KEY")
-
 # Optional: User token for linking rips to your Keepedia account
 USER_TOKEN = os.getenv("USER_TOKEN")
 
@@ -95,8 +92,7 @@ HANDBRAKE_AUDIO_PASSTHROUGH = [
 
 ASSET_KINDS = ("wrap", "poster", "banner")
 
-# OMDb timeout (seconds). Keeps the script from "hanging" too long.
-OMDB_TIMEOUT = 12
+API_TIMEOUT = 15  # seconds for API requests
 
 MIN_MAIN_MOVIE_SECONDS = 45 * 60  # 45 minutes
 
@@ -746,29 +742,15 @@ def check_dependencies():
     else:
         print("ℹ️  No USER_TOKEN set (discs won't be linked to your account)")
 
-    # 8. OMDB API key (check local and settings)
-    omdb_key = OMDB_API_KEY
-    omdb_source = ".env"
-    if not omdb_key and USER_TOKEN:
-        settings = get_user_settings()
-        omdb_key = settings.get("omdb_api_key")
-        omdb_source = "settings"
-
-    if omdb_key:
-        try:
-            url = f"https://www.omdbapi.com/?t=test&apikey={omdb_key}"
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            if data.get("Response") == "False" and "Invalid API key" in data.get("Error", ""):
-                print(f"❌ OMDB API key is invalid (from {omdb_source})")
-                all_ok = False
-            else:
-                print(f"✅ OMDB API key valid (from {omdb_source})")
-        except Exception:
-            print("⚠️  Could not verify OMDB API key")
-    else:
-        print("❌ OMDB_API_KEY not set (check .env or keepedia.org/settings)")
-        all_ok = False
+    # 8. TMDB API (via disc-api - server-side key)
+    try:
+        r = requests.get(f"{DISCFINDER_API}/search/movie?query=test", timeout=5)
+        if r.status_code == 200:
+            print("✅ TMDB API available (server-side)")
+        else:
+            print("⚠️  TMDB API returned error")
+    except Exception:
+        print("⚠️  Could not verify TMDB API")
 
     # Summary
     print("")
@@ -865,57 +847,60 @@ def normalize_title(volume):
     return title.strip()
 
 # ==========================================================
-# OMDB (robust wrappers)
+# TMDB (via disc-api proxy)
 # ==========================================================
 
-def _omdb_get(url: str):
+def _api_get(endpoint: str):
     """
-    Returns parsed JSON dict on success, None on any OMDb/network failure.
-    Never raises (so script doesn't crash if OMDb is down).
+    Call disc-api endpoint. Returns parsed JSON on success, None on failure.
+    Never raises (so script doesn't crash if API is down).
     """
     try:
+        url = f"{DISCFINDER_API}{endpoint}"
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "DVD-Rip-Automation-Script/1.0"}
+            headers={"User-Agent": "Keepedia-Ripper/2.0"}
         )
-        with urllib.request.urlopen(req, timeout=OMDB_TIMEOUT) as r:
-            data = json.loads(r.read().decode())
-        return data
+        with urllib.request.urlopen(req, timeout=API_TIMEOUT) as r:
+            return json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
-        # 503 etc
-        print(f"⚠️  OMDb error: HTTP {e.code} ({e.reason})")
+        print(f"⚠️  API error: HTTP {e.code} ({e.reason})")
         return None
     except urllib.error.URLError as e:
-        print(f"⚠️  OMDb network error: {e.reason}")
+        print(f"⚠️  API network error: {e.reason}")
         return None
     except Exception as e:
-        print(f"⚠️  OMDb error: {e}")
+        print(f"⚠️  API error: {e}")
         return None
 
-def omdb_by_title(title):
-    q = urllib.parse.quote(title)
-    url = f"https://www.omdbapi.com/?t={q}&type=movie&apikey={OMDB_API_KEY}"
-    data = _omdb_get(url)
+def tmdb_search(query):
+    """Search for movies via TMDB. Returns list of results."""
+    q = urllib.parse.quote(query)
+    data = _api_get(f"/search/movie?query={q}")
     if not data:
         return None
-    return data if data.get("Response") == "True" else None
+    return data.get("results", [])
 
-def omdb_by_imdb(imdb_id):
+def tmdb_find_by_imdb(imdb_id):
+    """Find movie by IMDb ID via TMDB. Returns movie dict or None."""
     if not imdb_id:
         return None
-    url = f"https://www.omdbapi.com/?i={imdb_id}&apikey={OMDB_API_KEY}"
-    data = _omdb_get(url)
+    data = _api_get(f"/tmdb/find/{imdb_id}")
     if not data:
         return None
-    return data if data.get("Response") == "True" else None
-
-def omdb_search(query):
-    q = urllib.parse.quote(query)
-    url = f"https://www.omdbapi.com/?s={q}&type=movie&apikey={OMDB_API_KEY}"
-    data = _omdb_get(url)
-    if not data:
-        return None  # important: distinguish "no results" vs "OMDb down"
-    return data.get("Search", []) if data.get("Response") == "True" else []
+    movies = data.get("movie_results", [])
+    if movies:
+        movie = movies[0]
+        # Convert to compatible format
+        return {
+            "Title": movie.get("title"),
+            "Year": movie.get("release_date", "")[:4],
+            "imdbID": imdb_id,
+            "tmdbID": movie.get("id"),
+            "Plot": movie.get("overview"),
+            "Poster": f"https://image.tmdb.org/t/p/w500{movie.get('poster_path')}" if movie.get("poster_path") else None
+        }
+    return None
 
 # ==========================================================
 # INTERACTIVE SEARCH
@@ -945,13 +930,13 @@ def interactive_imdb_search():
         # 1) IMDb ID path (tt.... or URL containing it)
         imdb_id = extract_imdb_id(query)
         if imdb_id:
-            movie = omdb_by_imdb(imdb_id)
+            movie = tmdb_find_by_imdb(imdb_id)
             if movie is None:
-                print("⚠️  OMDb is unavailable right now (or lookup failed).")
+                print("⚠️  API is unavailable right now (or lookup failed).")
                 print("💡 Tip: Try again, or use manual mode in the next step.")
                 continue
 
-            print("\n🔍 IMDb match (by ID):")
+            print("\n🔍 Movie match (by IMDb ID):")
             print(f"   Title: {movie['Title']} ({movie['Year']})")
             print(f"   IMDb:  https://www.imdb.com/title/{movie['imdbID']}/")
 
@@ -962,11 +947,10 @@ def interactive_imdb_search():
                 continue
 
         # 2) Free-text search path
-        results = omdb_search(query)
-
+        results = tmdb_search(query)
 
         if results is None:
-            print("⚠️  OMDb is unavailable right now.")
+            print("⚠️  API is unavailable right now.")
             print("💡 Tip: You can paste an IMDb ID like tt2188010 instead.")
             continue
 
@@ -978,9 +962,9 @@ def interactive_imdb_search():
         print("\n🔎 Search results:")
         top = results[:10]
         for i, item in enumerate(top, start=1):
-            imdb_id = item.get("imdbID")
-            imdb_url = f"https://www.imdb.com/title/{imdb_id}/" if imdb_id else ""
-            print(f"   [{i}] {item.get('Title')} ({item.get('Year')}) – {imdb_url}")
+            title = item.get("title")
+            year = item.get("release_date", "")[:4]
+            print(f"   [{i}] {title} ({year})")
 
         choice = input("👉 Pick a number (ENTER = 1, 's' = search again): ").strip().lower()
         if choice == "s":
@@ -999,14 +983,18 @@ def interactive_imdb_search():
                 print("❌ Invalid choice")
                 continue
 
-        movie = omdb_by_imdb(pick["imdbID"])
-        if movie is None:
-            print("⚠️  OMDb became unavailable while fetching details.")
-            continue
+        # Convert TMDB result to our format
+        movie = {
+            "Title": pick.get("title"),
+            "Year": pick.get("release_date", "")[:4],
+            "tmdbID": pick.get("id"),
+            "imdbID": None,  # Will be looked up if needed
+            "Plot": pick.get("overview"),
+            "Poster": f"https://image.tmdb.org/t/p/w500{pick.get('poster_path')}" if pick.get("poster_path") else None
+        }
 
-        print("\n🔍 IMDb match:")
+        print("\n🔍 Movie match:")
         print(f"   Title: {movie['Title']} ({movie['Year']})")
-        print(f"   IMDb:  https://www.imdb.com/title/{movie['imdbID']}/")
 
         confirm = input("👉 Is this the correct movie? [Y/n]: ").strip().lower()
         if confirm in ("", "y", "yes"):
@@ -1288,28 +1276,6 @@ def send_notification(title: str, message: str, success: bool = True):
 
     except Exception as e:
         print(f"⚠️ Failed to send notification: {e}")
-
-
-def ensure_omdb_api_key():
-    """
-    Ensure OMDB_API_KEY is available. If not set locally, try to fetch from user settings.
-    """
-    global OMDB_API_KEY
-
-    if OMDB_API_KEY:
-        return True  # Already set from .env
-
-    settings = get_user_settings()
-    omdb_key = settings.get("omdb_api_key")
-
-    if omdb_key:
-        OMDB_API_KEY = omdb_key
-        print("🔑 Using OMDB API key from settings")
-        return True
-
-    print("❌ OMDB_API_KEY not set")
-    print("   Set it in your .env file or at https://keepedia.org/settings")
-    return False
 
 
 def ensure_makemkv_registered():
@@ -1872,10 +1838,6 @@ def main():
 
     print(f"\n🎞 Disc: {volume}")
 
-    # Ensure OMDB API key is available
-    if not ensure_omdb_api_key():
-        sys.exit(1)
-
     # Ensure MakeMKV is registered before ripping
     ensure_makemkv_registered()
 
@@ -1988,25 +1950,33 @@ def main():
             # ✅ FIX: user said it's wrong -> treat as missing -> should post when identified
             needs_post = True
         else:
-            # OMDb might be down; if so we still continue to manual later
-            movie = omdb_by_imdb(api.get("imdb_id"))
+            # API might be down; if so we still continue to manual later
+            movie = tmdb_find_by_imdb(api.get("imdb_id"))
 
     if not movie:
         print("❌ Disc not found in Disc Finder API")
 
         guess = normalize_title(volume)
         print(f"\n🔎 Trying disc name: {guess}")
-        movie = omdb_by_title(guess)
+        results = tmdb_search(guess)
 
-        if movie:
+        if results:
+            # Take first result and convert to our format
+            pick = results[0]
+            movie = {
+                "Title": pick.get("title"),
+                "Year": pick.get("release_date", "")[:4],
+                "tmdbID": pick.get("id"),
+                "imdbID": None,
+                "Plot": pick.get("overview"),
+            }
             print("\n🔍 Found via disc name:")
             print(f"   Title: {movie['Title']} ({movie['Year']})")
-            print(f"   IMDb:  https://www.imdb.com/title/{movie['imdbID']}/")
             resp = input("👉 Is this correct? [Y/n]: ").strip().lower()
             if resp not in ("", "y", "yes"):
                 movie = interactive_imdb_search()
         else:
-            # OMDb may be down -> interactive_imdb_search will detect and return None
+            # API may be down -> interactive_imdb_search will detect and return None
             movie = interactive_imdb_search()
 
         if not movie:
