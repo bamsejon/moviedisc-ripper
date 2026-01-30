@@ -59,7 +59,7 @@ load_dotenv()
 # Optional: User token for linking rips to your Keepedia account
 USER_TOKEN = os.getenv("USER_TOKEN")
 
-DISCFINDER_API = os.getenv("DISCFINDER_API", "https://disc-api.bylund.cloud")
+DISCFINDER_API = os.getenv("DISCFINDER_API", "https://test-api.keepedia.org")
 
 # ==========================================================
 # CONFIG
