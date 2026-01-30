@@ -964,7 +964,8 @@ def interactive_imdb_search():
         for i, item in enumerate(top, start=1):
             title = item.get("title")
             year = item.get("release_date", "")[:4]
-            print(f"   [{i}] {title} ({year})")
+            tmdb_id = item.get("id")
+            print(f"   [{i}] {title} ({year}) – https://www.themoviedb.org/movie/{tmdb_id}")
 
         choice = input("👉 Pick a number (ENTER = 1, 's' = search again): ").strip().lower()
         if choice == "s":
@@ -995,6 +996,7 @@ def interactive_imdb_search():
 
         print("\n🔍 Movie match:")
         print(f"   Title: {movie['Title']} ({movie['Year']})")
+        print(f"   TMDB:  https://www.themoviedb.org/movie/{movie['tmdbID']}")
 
         confirm = input("👉 Is this the correct movie? [Y/n]: ").strip().lower()
         if confirm in ("", "y", "yes"):
@@ -1972,6 +1974,7 @@ def main():
             }
             print("\n🔍 Found via disc name:")
             print(f"   Title: {movie['Title']} ({movie['Year']})")
+            print(f"   TMDB:  https://www.themoviedb.org/movie/{movie['tmdbID']}")
             resp = input("👉 Is this correct? [Y/n]: ").strip().lower()
             if resp not in ("", "y", "yes"):
                 movie = interactive_imdb_search()
