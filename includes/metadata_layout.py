@@ -6,39 +6,55 @@ import os
 DISCFINDER_API = os.getenv("DISCFINDER_API", "https://disc-api.bylund.cloud")
 
 
-def wait_for_metadata_layout_ready(checksum: str, poll_interval: int = 3):
+def wait_for_metadata_layout_ready(checksum: str, poll_interval: int = 5):
     """
-    Blocks until metadata_layout.status == 'ready'
+    Blocks indefinitely until metadata_layout.status == 'ready'.
+    Will retry forever on network errors - user can Ctrl+C to abort.
     """
     print("\n⏳ Waiting for metadata layout to become READY...")
-    print("   (admin selection in UI)")
+    print("   Edit in browser, then mark as READY when done.")
+    print("   (Press Ctrl+C to abort)\n")
 
     spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     i = 0
+    error_count = 0
 
     while True:
-        r = requests.get(
-            f"{DISCFINDER_API}/metadata-layout/{checksum}",
-            timeout=5,
-        )
+        try:
+            r = requests.get(
+                f"{DISCFINDER_API}/metadata-layout/{checksum}",
+                timeout=10,
+            )
 
-        if r.status_code != 200:
-            print("\n❌ Failed to fetch metadata layout status")
-            print(r.text)
+            if r.status_code != 200:
+                error_count += 1
+                print(f"\r⚠️  API returned {r.status_code} (retry {error_count})...", end="", flush=True)
+                time.sleep(poll_interval)
+                continue
+
+            error_count = 0
+            status = r.json().get("status", "unknown")
+
+            print(
+                f"\r{spinner[i % len(spinner)]} status = {status}   ",
+                end="",
+                flush=True
+            )
+            i += 1
+
+            if status == "ready":
+                print("\n✅ Metadata layout is READY")
+                return
+
+        except requests.exceptions.Timeout:
+            error_count += 1
+            print(f"\r⚠️  Request timeout (retry {error_count})...     ", end="", flush=True)
+        except requests.exceptions.RequestException as e:
+            error_count += 1
+            print(f"\r⚠️  Network error (retry {error_count})...       ", end="", flush=True)
+        except KeyboardInterrupt:
+            print("\n\n❌ Aborted by user")
             raise SystemExit(1)
-
-        status = r.json().get("status", "unknown")
-
-        print(
-            f"\r{spinner[i % len(spinner)]} status = {status}",
-            end="",
-            flush=True
-        )
-        i += 1
-
-        if status == "ready":
-            print("\n✅ Metadata layout is READY")
-            return
 
         time.sleep(poll_interval)
 
