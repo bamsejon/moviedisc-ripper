@@ -1094,6 +1094,74 @@ def metadata_items_exist(checksum: str) -> bool:
     except Exception:
         return False
 
+
+def cleanup_angle_duplicates(checksum: str) -> int:
+    """
+    Remove angle duplicate metadata items.
+
+    DVDs with multiple angles have titles with identical durations.
+    MakeMKV only rips one file per angle set, so we should only keep
+    one metadata item per unique duration.
+
+    Returns number of duplicates removed.
+    """
+    try:
+        r = requests.get(
+            f"{DISCFINDER_API}/metadata-layout/{checksum}/items",
+            timeout=10
+        )
+        if r.status_code != 200:
+            return 0
+
+        items = r.json()
+        if not isinstance(items, list) or len(items) <= 1:
+            return 0
+
+        # Group items by duration - duplicates have same duration
+        seen_durations: dict[int, dict] = {}  # duration -> first item
+        duplicates: list[dict] = []
+
+        for item in items:
+            duration = item.get("duration_seconds")
+            if duration is None:
+                continue
+
+            if duration in seen_durations:
+                # This is a duplicate (likely an angle)
+                duplicates.append(item)
+            else:
+                seen_durations[duration] = item
+
+        if not duplicates:
+            return 0
+
+        print(f"\n🧹 Found {len(duplicates)} angle duplicate(s) to clean up...")
+
+        removed = 0
+        for dup in duplicates:
+            item_id = dup.get("id")
+            title_idx = dup.get("title_index")
+            duration = dup.get("duration_seconds")
+
+            try:
+                del_r = requests.delete(
+                    f"{DISCFINDER_API}/metadata-layout/{checksum}/items/{item_id}",
+                    timeout=10
+                )
+                if del_r.status_code in (200, 204):
+                    print(f"   ✓ Removed duplicate item {item_id} (title_index={title_idx}, duration={duration}s)")
+                    removed += 1
+                else:
+                    print(f"   ✗ Failed to remove item {item_id}: HTTP {del_r.status_code}")
+            except Exception as e:
+                print(f"   ✗ Error removing item {item_id}: {e}")
+
+        return removed
+
+    except Exception as e:
+        print(f"⚠️  Could not check for angle duplicates: {e}")
+        return 0
+
 def get_enabled_metadata_items(checksum: str) -> list[dict]:
     try:
         r = requests.get(
@@ -2047,6 +2115,8 @@ def main():
 
     if metadata_items_exist(checksum):
         print("ℹ️ Metadata items already exist – skipping MakeMKV scan & POST")
+        # Clean up any angle duplicates from previous scans
+        cleanup_angle_duplicates(checksum)
     else:
         titles = scan_titles_with_makemkv(make_mkv_path=MAKE_MKV_PATH)
 
