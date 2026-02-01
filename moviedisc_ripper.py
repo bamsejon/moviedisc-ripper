@@ -1894,6 +1894,9 @@ def disc_fingerprint(volume: str, disc_type: str) -> str:
                 continue
 
             rel = os.path.relpath(path, base)
+            # Normalize path separators for cross-platform consistency
+            # Windows uses \, Linux/Mac uses / - always use /
+            rel = rel.replace("\\", "/")
             files.append(rel)
             total_size += st.st_size
 
