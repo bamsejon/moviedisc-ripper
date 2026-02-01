@@ -1,20 +1,23 @@
 # Keepedia Release Plan
 
-## Releases
+## Released
 
-### v1.0 - Initial Release
+### v1.0 - Initial Release ✅
 - Movie ripping with OMDB
 - Metadata admin UI
 - Track selection (audio/subtitles)
 - Extras support with Plex naming
 - Preview server for ripped files
 
-### v1.1 - TMDB Migration
+### v1.1 - TMDB Migration ✅
 - Replace OMDB with TMDB
-- Proxy endpoints in disc-api (`/search/movie`, `/search/tv`)
+- Proxy endpoints in disc-api (`/tmdb/find`, `/tmdb/movie`, `/tmdb/search`)
 - No API key required for users
-- Remove OMDB settings from settings page
-- Remove `OMDB_API_KEY` from user model
+- Server-side TMDB API key
+
+---
+
+## Upcoming Releases
 
 ### v1.2 - Media Server Notifications
 - Settings: Configure Jellyfin/Plex URL + API token
@@ -104,27 +107,51 @@
 
 ### Smart Metadata Detection
 
-**OCR från baksidesbild**
-- Analysera inscannad wrap/back cover med OCR
-- Extrahera lista på special features från texten
-- Matcha OCR-text mot title-längder för auto-identifiering
-- Föreslå content_type (behind-the-scenes, deleted scenes, etc.)
-- Stöd för flera språk (svenska, engelska, etc.)
-- Använd Claude Vision API eller Tesseract för OCR
+**OCR from Back Cover**
+- Analyze scanned wrap/back cover with OCR
+- Extract list of special features from text
+- Match OCR text against title durations for auto-identification
+- Suggest content_type (behind-the-scenes, deleted scenes, etc.)
+- Multi-language support (Swedish, English, etc.)
+- Use Claude Vision API or Tesseract for OCR
 
-**DVD/Blu-ray meny-parsing**
-- Extrahera menystruktur från IFO-filer (DVD) / index.bdmv (Blu-ray)
-- Mappa menyalternativ till VTS/playlist-filer
-- Läs menytexten för att identifiera innehåll
-- Auto-matcha "Play Movie", "Special Features", "Deleted Scenes" etc.
-- Förinfyll metadata baserat på menynavigering
-- Hantera sub-menyer (Extras → Behind The Scenes → Item 1, 2, 3)
+**DVD/Blu-ray Menu Parsing**
+- Extract menu structure from IFO files (DVD) / index.bdmv (Blu-ray)
+- Map menu options to VTS/playlist files
+- Read menu text to identify content
+- Auto-match "Play Movie", "Special Features", "Deleted Scenes" etc.
+- Pre-fill metadata based on menu navigation
+- Handle sub-menus (Extras → Behind The Scenes → Item 1, 2, 3)
 
-**Kombinerad intelligens**
-- Korrelera OCR-resultat med menystruktur
-- Matcha title-längder mot beskrivningar ("20 min documentary" → 22:28 title)
-- Konfidenspoäng för varje förslag
-- Manuell override i admin UI
+**Combined Intelligence**
+- Correlate OCR results with menu structure
+- Match title durations to descriptions ("20 min documentary" → 22:28 title)
+- Confidence score for each suggestion
+- Manual override in admin UI
+
+---
+
+### Physical Media Scanning
+
+**Disc Art Scanning**
+- Scan the physical disc surface (disc art/label)
+- Extract disc number from multi-disc sets
+- OCR disc label text for title/edition info
+- Store disc art images in asset library
+- Display disc art in collection view
+
+**Case Insert Scanning**
+- Scan case inlets (inside cover art)
+- Often contains chapter listings or credits
+- Extract chapter names for auto-naming
+- Store as additional asset type
+
+**Back Cover Details**
+- Scan back of sleeve/cover
+- Extract runtime, audio formats, subtitle languages
+- Parse special features list
+- Cross-reference with disc content
+- Multi-language back cover support
 
 ---
 
