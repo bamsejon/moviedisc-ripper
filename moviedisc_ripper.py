@@ -1964,6 +1964,88 @@ def disc_fingerprint(volume: str, disc_type: str) -> str:
     return sha256(json.dumps(fingerprint, separators=(",", ":"), sort_keys=True))
 
 
+def disc_fingerprint_legacy(volume: str, disc_type: str) -> str:
+    """
+    Calculate fingerprint using the OLD algorithm (without junk file filtering).
+
+    This is used for migration: if a disc was previously scanned from a backup
+    that included junk files, this will produce the same checksum as before.
+    We can then migrate the old checksum to the new (filtered) one.
+    """
+    base = f"/Volumes/{volume}"
+
+    files = []
+    total_size = 0
+
+    for root, dirs, filenames in os.walk(base, onerror=lambda e: None):
+        for f in filenames:
+            path = os.path.join(root, f)
+            try:
+                st = os.stat(path)
+            except FileNotFoundError:
+                continue
+
+            rel = os.path.relpath(path, base)
+            rel = rel.replace("\\", "/")
+            files.append(rel)
+            total_size += st.st_size
+
+    files.sort()
+
+    fingerprint = {
+        "disc_type": disc_type,
+        "file_count": len(files),
+        "total_size": total_size,
+        "files": files[:200]
+    }
+
+    return sha256(json.dumps(fingerprint, separators=(",", ":"), sort_keys=True))
+
+
+def migrate_checksum_if_needed(new_checksum: str, legacy_checksum: str) -> bool:
+    """
+    Check if we need to migrate from a legacy (unfiltered) checksum to the new one.
+
+    Returns True if migration was performed, False otherwise.
+    """
+    if new_checksum == legacy_checksum:
+        # No junk files present, no migration needed
+        return False
+
+    # Check if new checksum already exists
+    new_lookup = discfinder_lookup(new_checksum)
+    if new_lookup:
+        # New checksum already in DB, no migration needed
+        return False
+
+    # Check if legacy checksum exists
+    legacy_lookup = discfinder_lookup(legacy_checksum)
+    if not legacy_lookup:
+        # Neither exists, no migration needed
+        return False
+
+    # Legacy exists but new doesn't - migrate!
+    print(f"🔄 Migrating checksum (junk file filtering applied)")
+    print(f"   Old: {legacy_checksum[:16]}...")
+    print(f"   New: {new_checksum[:16]}...")
+
+    try:
+        r = requests.put(
+            f"{DISCFINDER_API}/discs/{legacy_checksum}/checksum",
+            json={"new_checksum": new_checksum},
+            timeout=10
+        )
+
+        if r.status_code == 200:
+            print("✅ Checksum migrated successfully")
+            return True
+        else:
+            print(f"⚠️ Migration failed: {r.status_code} {r.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Migration failed: {e}")
+        return False
+
 
 # ==========================================================
 # MAIN
@@ -2017,6 +2099,14 @@ def main():
                 sys.exit(1)
 
             print("✅ Checksum upgraded")
+            api = discfinder_lookup(new_checksum)
+
+    # ♻️ migrate junk-file checksum → filtered checksum
+    # This handles the case where a disc was previously scanned from a backup
+    # that included OS junk files (._*, .DS_Store, etc.)
+    if not api:
+        unfiltered_checksum = disc_fingerprint_legacy(volume, disc_type)
+        if migrate_checksum_if_needed(new_checksum, unfiltered_checksum):
             api = discfinder_lookup(new_checksum)
 
     checksum = new_checksum
