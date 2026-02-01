@@ -1879,14 +1879,66 @@ def apply_track_metadata(output_file: str, audio_tracks: list, subtitle_tracks: 
 # CALCULATE CHECKSUM FOR UNIQUE DISC
 # ==========================================================
 
+# OS-specific junk files to exclude from checksum calculation
+# These are created by the OS when browsing/copying, not part of the actual disc
+_JUNK_FILES = frozenset({
+    ".ds_store",      # macOS
+    "thumbs.db",      # Windows
+    "desktop.ini",    # Windows
+    ".spotlight-v100",# macOS Spotlight
+    ".fseventsd",     # macOS FSEvents
+    ".trashes",       # macOS Trash
+    "$recycle.bin",   # Windows Recycle Bin
+})
+
+# Prefixes for junk files
+_JUNK_PREFIXES = ("._",)  # macOS resource forks
+
+
+def _is_junk_file(filename: str) -> bool:
+    """Check if a file is OS-specific junk that should be excluded."""
+    lower = filename.lower()
+    if lower in _JUNK_FILES:
+        return True
+    for prefix in _JUNK_PREFIXES:
+        if lower.startswith(prefix):
+            return True
+    return False
+
+
 def disc_fingerprint(volume: str, disc_type: str) -> str:
+    """
+    Calculate a cross-platform consistent fingerprint for a disc.
+
+    The fingerprint is based on:
+    - disc_type: "dvd" or "bluray"
+    - file_count: number of files (excluding OS junk)
+    - total_size: total size of all files in bytes
+    - files: sorted list of relative file paths (max 200)
+
+    Cross-platform consistency is ensured by:
+    - Normalizing path separators to forward slash
+    - Excluding OS-specific junk files (.DS_Store, Thumbs.db, etc.)
+    - Sorting files consistently
+
+    Note: File paths preserve original case to maintain backward compatibility
+    with existing checksums. The disc file system (UDF/ISO9660) stores the
+    original case, which is consistent across all platforms.
+    """
     base = f"/Volumes/{volume}"
 
     files = []
     total_size = 0
 
     for root, dirs, filenames in os.walk(base, onerror=lambda e: None):
+        # Skip junk directories
+        dirs[:] = [d for d in dirs if not _is_junk_file(d)]
+
         for f in filenames:
+            # Skip junk files
+            if _is_junk_file(f):
+                continue
+
             path = os.path.join(root, f)
             try:
                 st = os.stat(path)
