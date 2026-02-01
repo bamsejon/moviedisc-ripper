@@ -38,13 +38,26 @@ _TINFO_RE = re.compile(r"^TINFO:(\d+),(\d+),(\d+),\"(.*)\"$")
 _SINFO_RE = re.compile(r"^SINFO:(\d+),(\d+),(\d+),(\d+),\"(.*)\"$")
 
 # Stream type codes from MakeMKV
+# NOTE: These codes differ between DVD and Blu-ray!
+#   DVD:     6206=Video, 6201=Audio, 6202=Subtitles
+#   Blu-ray: 6201=Video, 6202=Audio, 6203=Subtitles
+# The detection logic uses string matching ("video"/"audio"/"subtitles") instead
+# of these numeric codes to work with both formats.
+STREAM_TYPE_VIDEO_DVD = 6206
+STREAM_TYPE_AUDIO_DVD = 6201
+STREAM_TYPE_SUBTITLES_DVD = 6202
+STREAM_TYPE_VIDEO_BLURAY = 6201
+STREAM_TYPE_AUDIO_BLURAY = 6202
+STREAM_TYPE_SUBTITLES_BLURAY = 6203
+
+# Legacy aliases (kept for backward compatibility)
 STREAM_TYPE_VIDEO = 6206
 STREAM_TYPE_AUDIO = 6201
 STREAM_TYPE_SUBTITLES = 6202
 
 # SINFO attribute IDs (from MakeMKV source/output analysis)
-SINFO_TYPE = 1          # Stream type (6201=Audio, 6202=Subtitles, 6206=Video)
-SINFO_TYPE_NAME = 2     # Stream type name ("Audio", "Video", "Subtitles")
+SINFO_TYPE = 1          # Stream type code in attr_type position, type name in value
+SINFO_TYPE_NAME = 2     # Channel info for audio (e.g., "Surround 5.1")
 SINFO_LANG_CODE = 3     # Language code (eng, spa, fra, etc.)
 SINFO_LANG_NAME = 4     # Language name (English, Spanish, French, etc.)
 SINFO_CODEC_ID = 5      # Codec ID (A_AC3, A_DTS, S_HDMV/PGS, etc.)
@@ -515,23 +528,15 @@ def scan_titles_with_makemkv(make_mkv_path: str) -> List[Dict[str, Any]]:
         for stream_index in sorted(sinfo.keys()):
             stream_info = sinfo[stream_index]
 
-            # Get stream type from attribute 1
+            # Get stream type from attribute 1 (SINFO_TYPE)
+            # The value is always a string like "Audio", "Video", "Subtitles"
+            # This works for both DVD and Blu-ray formats
             type_value = stream_info.get(SINFO_TYPE, "")
-
-            # Type can be the string "Audio"/"Video"/"Subtitles" or a code
             type_str = type_value.lower() if isinstance(type_value, str) else ""
 
-            # Check for type codes or strings
-            is_audio = (
-                type_str in ("audio", "6201") or
-                "audio" in type_str or
-                type_value == str(STREAM_TYPE_AUDIO)
-            )
-            is_subtitle = (
-                type_str in ("subtitles", "subtitle", "6202") or
-                "subtitle" in type_str or
-                type_value == str(STREAM_TYPE_SUBTITLES)
-            )
+            # Detect stream type using string matching (works for DVD + Blu-ray)
+            is_audio = "audio" in type_str
+            is_subtitle = "subtitle" in type_str
 
             if is_audio:
                 track = _parse_audio_track(stream_index, stream_info)
