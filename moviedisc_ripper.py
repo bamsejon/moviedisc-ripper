@@ -1911,12 +1911,13 @@ def disc_fingerprint(volume: str, disc_type: str) -> str:
     Calculate a cross-platform consistent fingerprint for a disc.
 
     The fingerprint is based on:
-    - disc_type: "dvd" or "bluray"
+    - disc_type: "dvd" or "bluray" (normalized to lowercase)
     - file_count: number of files (excluding OS junk)
     - total_size: total size of all files in bytes
     - files: sorted list of relative file paths (max 200)
 
     Cross-platform consistency is ensured by:
+    - Normalizing disc_type to lowercase
     - Normalizing path separators to forward slash
     - Excluding OS-specific junk files (.DS_Store, Thumbs.db, etc.)
     - Sorting files consistently
@@ -1925,6 +1926,8 @@ def disc_fingerprint(volume: str, disc_type: str) -> str:
     with existing checksums. The disc file system (UDF/ISO9660) stores the
     original case, which is consistent across all platforms.
     """
+    # Normalize disc_type to lowercase for consistent checksums
+    disc_type = disc_type.lower()
     base = f"/Volumes/{volume}"
 
     files = []
@@ -1964,14 +1967,20 @@ def disc_fingerprint(volume: str, disc_type: str) -> str:
     return sha256(json.dumps(fingerprint, separators=(",", ":"), sort_keys=True))
 
 
-def disc_fingerprint_legacy(volume: str, disc_type: str) -> str:
+def disc_fingerprint_legacy(volume: str, disc_type: str, preserve_case: bool = False) -> str:
     """
     Calculate fingerprint using the OLD algorithm (without junk file filtering).
 
     This is used for migration: if a disc was previously scanned from a backup
     that included junk files, this will produce the same checksum as before.
     We can then migrate the old checksum to the new (filtered) one.
+
+    Args:
+        preserve_case: If True, don't lowercase disc_type (for migrating old
+                       checksums that used uppercase "DVD"/"BLURAY")
     """
+    if not preserve_case:
+        disc_type = disc_type.lower()
     base = f"/Volumes/{volume}"
 
     files = []
@@ -2107,6 +2116,13 @@ def main():
     if not api:
         unfiltered_checksum = disc_fingerprint_legacy(volume, disc_type)
         if migrate_checksum_if_needed(new_checksum, unfiltered_checksum):
+            api = discfinder_lookup(new_checksum)
+
+    # ♻️ migrate uppercase disc_type checksum → lowercase
+    # Old versions used "DVD"/"BLURAY" instead of "dvd"/"bluray"
+    if not api:
+        uppercase_checksum = disc_fingerprint_legacy(volume, disc_type, preserve_case=True)
+        if migrate_checksum_if_needed(new_checksum, uppercase_checksum):
             api = discfinder_lookup(new_checksum)
 
     checksum = new_checksum
