@@ -84,6 +84,42 @@
 
 ---
 
+### Raw Output / ISO Mode
+
+**Rip Without Encoding**
+- Settings option: Output format (Encoded / Raw MKV / ISO)
+- Raw MKV: Direct output from MakeMKV without HandBrake
+- ISO: Full disc backup as .iso file
+- Useful for archival and original quality preservation
+- Per-disc override in metadata admin UI
+- Show estimated file sizes for each option
+
+**ISO Output Features**
+- Mount and play ISO files directly in media servers
+- Preserve original menus and structure
+- Option to keep both ISO and encoded version
+- Compression options for ISO (none / gzip)
+
+---
+
+### Cross-Platform Testing
+
+**Linux Test Environment**
+- Docker container with MakeMKV + HandBrake
+- CI/CD pipeline for running tests
+- Test against ISO backups (no physical drive needed)
+- Verify checksum consistency across platforms
+- Test filesystem differences (ext4, NTFS, APFS)
+
+**Windows Test Environment**
+- PowerShell setup script
+- GitHub Actions runner with Windows
+- Test path normalization (backslash handling)
+- Test Unicode filename handling
+- Verify MakeMKV CLI compatibility
+
+---
+
 ### Ripping Station
 
 **Bootable USB Image**
