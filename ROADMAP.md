@@ -102,6 +102,32 @@
 
 ---
 
+### Smart Metadata Detection
+
+**OCR från baksidesbild**
+- Analysera inscannad wrap/back cover med OCR
+- Extrahera lista på special features från texten
+- Matcha OCR-text mot title-längder för auto-identifiering
+- Föreslå content_type (behind-the-scenes, deleted scenes, etc.)
+- Stöd för flera språk (svenska, engelska, etc.)
+- Använd Claude Vision API eller Tesseract för OCR
+
+**DVD/Blu-ray meny-parsing**
+- Extrahera menystruktur från IFO-filer (DVD) / index.bdmv (Blu-ray)
+- Mappa menyalternativ till VTS/playlist-filer
+- Läs menytexten för att identifiera innehåll
+- Auto-matcha "Play Movie", "Special Features", "Deleted Scenes" etc.
+- Förinfyll metadata baserat på menynavigering
+- Hantera sub-menyer (Extras → Behind The Scenes → Item 1, 2, 3)
+
+**Kombinerad intelligens**
+- Korrelera OCR-resultat med menystruktur
+- Matcha title-längder mot beskrivningar ("20 min documentary" → 22:28 title)
+- Konfidenspoäng för varje förslag
+- Manuell override i admin UI
+
+---
+
 ### Cross-Platform Testing
 
 **Linux Test Environment**
