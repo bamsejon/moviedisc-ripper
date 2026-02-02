@@ -1372,13 +1372,17 @@ def send_notification(title: str, message: str, success: bool = True):
 
 def notify_media_server(movie_dir: str):
     """
-    Trigger a library refresh on the user's configured media server.
-    Supports Jellyfin and Plex.
+    Trigger a library refresh on the user's configured media server(s).
+    Supports Jellyfin and Plex, or both simultaneously.
     """
     settings = get_user_settings()
 
-    server_type = settings.get("media_server_type")
-    if not server_type or server_type == "none":
+    # Check if any media server is configured (new-style or legacy)
+    has_jellyfin = settings.get("jellyfin_enabled") and settings.get("jellyfin_url")
+    has_plex = settings.get("plex_enabled") and settings.get("plex_url")
+    has_legacy = settings.get("media_server_type") and settings.get("media_server_type") != "none"
+
+    if not has_jellyfin and not has_plex and not has_legacy:
         return
 
     try:
@@ -1391,8 +1395,16 @@ def notify_media_server(movie_dir: str):
 
         if response.ok:
             result = response.json()
-            server = result.get("server", server_type)
-            print(f"📺 Media server notified ({server})")
+            servers = result.get("servers_notified", [])
+            errors = result.get("errors")
+
+            if servers:
+                server_list = ", ".join(servers)
+                print(f"📺 Media server notified ({server_list})")
+
+            if errors:
+                for err in errors:
+                    print(f"⚠️ {err}")
         else:
             print(f"⚠️ Media server notification failed: {response.status_code}")
 
