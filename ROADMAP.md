@@ -15,35 +15,46 @@
 - No API key required for users
 - Server-side TMDB API key
 
+### v1.5 - Media Server Notifications ✅
+- Support for BOTH Jellyfin AND Plex simultaneously
+- Separate enable/disable checkboxes per server
+- Jellyfin: Server URL + API token + optional library ID
+- Plex: PIN-based authentication (supports Google/Apple/Plex login)
+- Plex: Library selector dropdown after Test Connection
+- Plex: Library name persistence (shows name not just ID)
+- After encode → trigger library refresh via API
+- Show/Copy buttons for API tokens
+
 ---
 
 ## Upcoming Releases
 
-### v1.2 - Media Server Notifications
-- Settings: Configure Jellyfin/Plex URL + API token
-- After encode → trigger library refresh via API
-- Targeted scan (specific folder only)
-- Support for Jellyfin + Plex
-
-### v1.3 - Multi-disc Support
+### v1.6 - Multi-disc Support
 - Prompt "Main disc / Secondary disc" after movie identification
 - Link secondary disc to main disc via IMDB ID
 - `parent_checksum` + `disc_number` in database
 - Extras from disc 2 → same folder with `[Disc 2]` prefix
 
-### v1.4 - TV Series Support
+### v1.7 - TV Series Support
 - Series mode in script (minimal input: series name + season)
 - Metadata admin UI for episode mapping
 - Auto-match on duration
 - Plex naming: `Show - S01E01 - Title.mkv`
 - TMDB integration for episode data
 
-### v1.5 - Multi-language Support
+### v1.8 - Multi-language Support
 - Multi-language support for keepedia.org
 - Swedish, English, + more languages
 - Language selection in settings
 - Translation of metadata admin UI
 - Localized error messages in ripper script
+
+### v1.9 - keepedia.org Design Refresh
+- Modern, polished UI for keepedia.org
+- Improved dashboard layout
+- Better mobile responsiveness
+- Consistent design language across all pages
+- Dark/light mode toggle
 
 ---
 
