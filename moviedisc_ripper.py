@@ -1370,6 +1370,36 @@ def send_notification(title: str, message: str, success: bool = True):
         print(f"⚠️ Failed to send notification: {e}")
 
 
+def notify_media_server(movie_dir: str):
+    """
+    Trigger a library refresh on the user's configured media server.
+    Supports Jellyfin and Plex.
+    """
+    settings = get_user_settings()
+
+    server_type = settings.get("media_server_type")
+    if not server_type or server_type == "none":
+        return
+
+    try:
+        response = requests.post(
+            f"{API}/media-server/refresh",
+            headers={"Authorization": f"Bearer {API_TOKEN}"},
+            json={"path": movie_dir},
+            timeout=30
+        )
+
+        if response.ok:
+            result = response.json()
+            server = result.get("server", server_type)
+            print(f"📺 Media server notified ({server})")
+        else:
+            print(f"⚠️ Media server notification failed: {response.status_code}")
+
+    except Exception as e:
+        print(f"⚠️ Media server notification error: {e}")
+
+
 def ensure_makemkv_registered():
     """
     Check if MakeMKV is registered. If not, and user has a key in settings,
@@ -2536,6 +2566,9 @@ def main():
         message=f"{title} ({year}) is ready in your library",
         success=True
     )
+
+    # Trigger media server library refresh
+    notify_media_server(movie_dir)
 
 # ==========================================================
 # ENTRY
