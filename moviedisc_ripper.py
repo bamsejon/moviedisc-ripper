@@ -1196,7 +1196,7 @@ def discfinder_lookup(checksum):
     )
     return r.json() if r.status_code == 200 else None
 
-def discfinder_post(disc_label, disc_type, checksum, movie):
+def discfinder_post(disc_label, disc_type, checksum, movie, parent_checksum=None, disc_number=None):
     """
     Posts a new disc to the API. Returns the disc ID if successful.
     """
@@ -1208,6 +1208,12 @@ def discfinder_post(disc_label, disc_type, checksum, movie):
         "title": movie["Title"],
         "year": movie["Year"]
     }
+
+    # Add parent linking if provided
+    if parent_checksum:
+        payload["parent_checksum"] = parent_checksum
+    if disc_number:
+        payload["disc_number"] = disc_number
 
     headers = {}
     if USER_TOKEN:
@@ -1270,6 +1276,103 @@ def link_disc_to_user(checksum: str):
 
     except Exception as e:
         print(f"⚠️ Failed to link disc to account: {e}")
+
+
+def get_auth_headers():
+    """Build auth headers if user token available."""
+    if USER_TOKEN:
+        return {"Authorization": f"Bearer {USER_TOKEN}"}
+    return {}
+
+
+def search_discs_by_imdb(imdb_id: str):
+    """Search for discs by IMDb ID."""
+    try:
+        r = requests.get(
+            f"{DISCFINDER_API}/discs",
+            params={"imdb_id": imdb_id},
+            headers=get_auth_headers(),
+            timeout=10
+        )
+        if r.status_code != 200:
+            print("❌ No discs found with that IMDb ID")
+            return None
+
+        discs = r.json()
+        if not discs:
+            print("❌ No discs found with that IMDb ID")
+            return None
+
+        return pick_disc_from_list(discs)
+    except Exception as e:
+        print(f"❌ Search failed: {e}")
+        return None
+
+
+def select_from_recent_rips():
+    """Show user's recent rips for selection."""
+    headers = get_auth_headers()
+    if not headers:
+        print("❌ User token required for recent rips")
+        return None
+
+    try:
+        r = requests.get(
+            f"{DISCFINDER_API}/users/me/recent-rips",
+            headers=headers,
+            timeout=10
+        )
+        if r.status_code != 200:
+            print("❌ Could not fetch recent rips")
+            return None
+
+        discs = r.json()
+        if not discs:
+            print("❌ No recent rips found")
+            return None
+
+        return pick_disc_from_list(discs)
+    except Exception as e:
+        print(f"❌ Failed to fetch recent rips: {e}")
+        return None
+
+
+def pick_disc_from_list(discs):
+    """Display disc list and let user pick one."""
+    print("\n   Available discs:")
+    for i, disc in enumerate(discs, 1):
+        print(f"   {i}) {disc['title']} ({disc['year']}) - {disc['disc_label']}")
+
+    choice = input(f"\n   Select [1-{len(discs)}] or 0 to cancel: ").strip()
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(discs):
+            return discs[idx]
+    except ValueError:
+        pass
+
+    return None
+
+
+def select_parent_disc():
+    """Let user select parent disc for multi-disc linking."""
+    print("\n🔗 Select parent disc:")
+    print("   1) Search by IMDb ID")
+    print("   2) Recent rips")
+    print("   3) Cancel")
+
+    choice = input("\n   Choice [1-3]: ").strip()
+
+    if choice == "1":
+        imdb_id = input("   IMDb ID (e.g., tt0123456): ").strip()
+        if not imdb_id:
+            return None
+        return search_discs_by_imdb(imdb_id)
+
+    elif choice == "2":
+        return select_from_recent_rips()
+
+    return None
 
 
 def get_user_settings() -> dict:
@@ -2227,6 +2330,30 @@ def main():
     # ✅ FIX: remember whether this disc was missing in API initially
     needs_post = (api is None)
 
+    # Secondary disc detection - only for NEW discs not yet in API
+    is_secondary_disc = False
+    parent_disc = None
+    disc_number = None
+
+    if needs_post and not api:
+        print("\n❓ Is this a secondary disc for a multi-disc set? (e.g., Disc 2 of a Steelbook)")
+        resp = input("   [y/N]: ").strip().lower()
+
+        if resp in ("y", "yes"):
+            parent_disc = select_parent_disc()
+
+            if parent_disc:
+                is_secondary_disc = True
+                # Use parent's movie info
+                movie = {
+                    "Title": parent_disc["title"],
+                    "Year": parent_disc["year"],
+                    "imdbID": parent_disc.get("imdb_id"),
+                    "tmdbID": None
+                }
+                disc_number = 2  # Will be auto-incremented by API if needed
+                print(f"\n🔗 Linked to: {parent_disc['title']} ({parent_disc['year']})")
+
     # -------------------------------
     # DO NOT CHANGE THIS LOGIC:
     # - If API hit -> show title + 10s "wrong" window
@@ -2289,7 +2416,14 @@ def main():
     disc_id = None
     if needs_post:
         print("📤 Posting disc to DiscFinder API...")
-        disc_id = discfinder_post(volume, disc_type, checksum, movie)
+        if is_secondary_disc and parent_disc:
+            disc_id = discfinder_post(
+                volume, disc_type, checksum, movie,
+                parent_checksum=parent_disc.get("checksum"),
+                disc_number=disc_number
+            )
+        else:
+            disc_id = discfinder_post(volume, disc_type, checksum, movie)
     else:
         # Disc already existed - still link it to the user's account
         link_disc_to_user(checksum)
@@ -2353,7 +2487,16 @@ def main():
 
     # Create destination dir early (needed for cover downloads BEFORE ripping)
     os.makedirs(MOVIES_DIR, exist_ok=True)
-    movie_dir = os.path.join(MOVIES_DIR, f"{title} ({year})")
+
+    # For secondary discs, use parent's folder
+    if is_secondary_disc and parent_disc:
+        parent_title = sanitize_filename(parent_disc["title"])
+        parent_year = parent_disc["year"]
+        movie_dir = os.path.join(MOVIES_DIR, f"{parent_title} ({parent_year})")
+        print(f"📂 Using parent disc folder: {movie_dir}")
+    else:
+        movie_dir = os.path.join(MOVIES_DIR, f"{title} ({year})")
+
     os.makedirs(movie_dir, exist_ok=True)
 
     output = os.path.join(movie_dir, f"{title} ({year}).mkv")
